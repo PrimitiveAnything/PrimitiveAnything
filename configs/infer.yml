@@ -1,0 +1,52 @@
+dataset:
+  name: base
+  pc_dir: ./data/test_pc
+  bs_dir: data/basic_shapes_norm
+  max_length: 144
+  range_scale: [0, 1]
+  range_rotation: [-180, 180]
+  range_translation: [-1, 1]
+  rotation_type: euler
+  pc_format: pn
+model:
+  attn_depth: 6
+  attn_heads: 6
+  bin_smooth_blur_sigma: -1
+  bs_pc_dir: data/basic_shapes_norm_pc10000
+  coarse_pre_gateloop_depth: 3
+  continuous_range_rotation:
+  - -181
+  - 181
+  continuous_range_scale:
+  - 0
+  - 1
+  continuous_range_translation:
+  - -1
+  - 1
+  dim: 768
+  dim_rotation_embed: 16
+  dim_scale_embed: 16
+  dim_translation_embed: 16
+  dim_type_embed: 48
+  dropout: 0.0
+  embed_order: ctrs
+  gateloop_use_heinsen: false
+  loss_weight:
+    eos: 1.0
+    reconstruction: 1.0
+    rotation: 1.0
+    scale: 1.0
+    translation: 1.0
+    type: 1.0
+  max_primitive_len: 144
+  name: discrete
+  num_discrete_rotation: 181
+  num_discrete_scale: 128
+  num_discrete_translation: 128
+  num_type: 3
+  shape_cond_with_cat: true
+  shape_cond_with_cross_attn: false
+  shape_cond_with_film: false
+  shape_condition_dim: 768
+  shape_condition_len: 77
+  shape_condition_model_type: michelangelo
