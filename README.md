@@ -2,8 +2,17 @@
 
 <a href="https://primitiveanything.github.io/"><img src="https://img.shields.io/static/v1?label=Project%20Page&message=Github&color=blue&logo=github-pages"></a>&ensp;<a href="#"><img src="https://img.shields.io/badge/ArXiv-250x.xxxxx-brightgreen"></a>&ensp;<a href="https://huggingface.co/hyz317/PrimitiveAnything"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Model_Card-Huggingface-orange"></a>&ensp;<a href="https://huggingface.co/spaces/hyz317/PrimitiveAnything"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Gradio%20Demo-Huggingface-orange"></a>
 
-<img src="./assets/teaser.jpg" width="100%">
+<div align="center">
 
+**Jingwen Ye<sup>1\*</sup>, [Yuze He](https://hyzcluster.github.io/)<sup>1,2\*</sup>, [Yanning Zhou](https://amandaynzhou.github.io/)<sup>1†</sup>,  Yiqin Zhu<sup>1</sup>, Kaiwen Xiao<sup>1</sup>, [Yong-Jin Liu](https://yongjinliu.github.io/)<sup>2†</sup>, Wei Yang<sup>1</sup>, Xiao Han<sup>1†</sup>**
+
+<sup>1</sup>Tencent AIPD &ensp;&ensp;<sup>2</sup>Tsinghua University
+
+<sup>\*</sup>Equal Contributions &ensp;&ensp;<sup>†</sup>Corresponding Authors   
+
+</div>
+
+<img src="./assets/teaser.jpg" width="100%">
 
 ## 🔥 Updates
 
