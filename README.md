@@ -55,7 +55,23 @@ Then download data and pretrained weights:
 
 3. **Demo and test data**:
 
-   Download from this [Google Drive link](https://drive.google.com/file/d/1FZZjk0OvzETD5j4OODEghS_YppcS_ZbM/view?usp=sharing), then decompress the files into `./data/`.
+   Download from this [Google Drive link](https://drive.google.com/file/d/1FZZjk0OvzETD5j4OODEghS_YppcS_ZbM/view?usp=sharing), then decompress the files into `./data/`; or you can download from our 🤗 Hugging Face datasets library:
+
+```python
+from huggingface_hub import hf_hub_download, list_repo_files
+
+# Get list of all files in repo
+files = list_repo_files(repo_id="hyz317/PrimitiveAnything", repo_type="dataset")
+
+# Download each file
+for file in files:
+    file_path = hf_hub_download(
+        repo_id="hyz317/PrimitiveAnything",
+        filename=file,
+        repo_type="dataset",
+        local_dir='./data'
+    )
+```
 
 After downloading and organizing the files, your project directory should look like this:
 
