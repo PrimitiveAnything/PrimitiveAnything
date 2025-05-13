@@ -19,3 +19,4 @@ mesh2sdf
 seaborn
 mesh_to_sdf
 point_cloud_utils
+git+https://github.com/facebookresearch/pytorch3d.git
