@@ -96,14 +96,38 @@ def normalize_weights(imp_weights):
   norm_weights = imp_weights / totWeights
   return norm_weights
 
-
-def chamfer_loss(predParts, dataloader, cuboid_sampler):
+def chamfer_loss(predParts, cps, cuboid_sampler, gridBound, gridSize, loadedVoxels):
   sampled_points, imp_weights = partComposition(predParts, cuboid_sampler)
   norm_weights = normalize_weights(imp_weights)
-  tsdfLosses = dataloader.chamfer_forward(sampled_points)
+  tsdfLosses = chamfer_forward(sampled_points, cps, gridBound, gridSize, loadedVoxels)
   weighted_loss = tsdfLosses * norm_weights  # B x nP x 1
   return torch.sum(weighted_loss, 1)
 
+def chamfer_forward(queryPoints, loadedCPs, gridBound, gridSize, loadedVoxels):
+  #query points is B x nQ x 3
+  neighbourIds = pointClosestCellIndex(queryPoints, gridBound, gridSize).data
+  loadedCPs = Variable(loadedCPs.cuda())
+  queryDiffs = []
+
+  for b in range(queryPoints.size(0)):
+    inds = neighbourIds[b]
+    inds = gridSize*gridSize*inds[:,0]  + gridSize*inds[:,1] + inds[:,2]
+    cp = loadedCPs[b,0].view(-1,3)
+    cp = cp[inds]
+    voxels = Variable(loadedVoxels[b][0].view(-1))
+    voxels = voxels[inds]
+    diff = (cp - queryPoints[b].view(-1,3)).pow(2).sum(1)
+    queryDiffs.append((-voxels+1) * diff)
+  queryDiffs = torch.stack(queryDiffs)
+
+  return queryDiffs
+
+def pointClosestCellIndex(points, gridBound, gridSize):
+  gridMin = -gridBound + gridBound / gridSize
+  gridMax = gridBound - gridBound / gridSize
+  inds = (points - gridMin) * gridSize / (2 * gridBound)
+  inds = torch.round(torch.clamp(inds, min=0, max=gridSize-1)).long()
+  return inds
 
 
 def test_tsdf_pred():
