@@ -36,7 +36,7 @@ class R2N2ShapeNetDataset(Dataset):
 
         self.n_sample_points = n_sample_points
 
-        self.r2n2_dataset = R2N2(partition, self.shapenet_dir, self.r2n2_dir, self.r2n2_splits_path, return_voxels=True)
+        self.r2n2_dataset = R2N2(partition, str(self.shapenet_dir), str(self.r2n2_dir), str(self.r2n2_splits_path), return_voxels=True)
 
     def __len__(self):
         return len(self.r2n2_dataset)
@@ -45,9 +45,8 @@ class R2N2ShapeNetDataset(Dataset):
         model = self.r2n2_dataset[index]
         mesh = Meshes(verts=[model['verts']], faces=[model['faces']])
         surface_points = sample_points_from_meshes(mesh, num_samples=self.n_sample_points) # (1, N, 3)
-        voxel = model['voxels'] # (V, D, D, D) where V is the number of views
-        tsdf = torch.zeros((self.n_sample_points,)) # TODO
-        closest_points = torch.zeros((self.n_sample_points,)) # TODO
-        return voxel, tsdf, surface_points, closest_points
+        # TODO: Figure out which voxel to use (we have 1 per view)
+        voxel = model['voxels'][0].unsqueeze(0).float() # (V, D, D, D) where V is the number of views
+        return voxel, surface_points
     
 # Other functions in the previous data loader 
