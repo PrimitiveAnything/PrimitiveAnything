@@ -8,7 +8,7 @@ from modules import primitives
 class Network(nn.Module):
     def __init__(self, params):
         super(Network, self).__init__()
-        self.ve = vE.convEncoderSimple3d(3, 4, 1, params.useBn)
+        self.ve = vE.convEncoderSimple3d(5, 16, 1, params.useBn)
         outChannels = self.outChannels = self.ve.output_channels
         layers = []
         for i in range(2):

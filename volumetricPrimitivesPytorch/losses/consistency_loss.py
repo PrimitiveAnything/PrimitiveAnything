@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Variable
 import pytorch3d.ops
 from pytorch3d.structures import Volumes
+import torch.nn.functional as F
 
 from modules.cuboid import CuboidSurface
 from modules.transformer import rigidPointsTransform
@@ -13,15 +14,15 @@ def consistency_loss(predParts, n_samples, targetPoints, loadedVoxels):
     sampled_points, imp_weights = partComposition(predParts, cuboid_sampler)
     norm_weights = normalize_weights(imp_weights)
     # Find the closes points
-    distance_to_target, target_k_indices = pytorch3d.ops.knn_points(sampled_points, targetPoints, K=1) # (N, SampleSize, K), (N, SampleSize, K)
+    distance_to_target, _, _ = pytorch3d.ops.knn_points(sampled_points, targetPoints, K=1) # (N, SampleSize, K)
     # Check if the predicted points are inside the target volume
     is_inside = is_point_inside_voxel_grid(sampled_points, loadedVoxels)
     # Set distance to zero if inside the target volume
     distance_to_target[is_inside] = 0
-    weighted_loss = (distance_to_target * norm_weights).sum(dim=1)  # B x nP x 1
+    weighted_loss = (distance_to_target * norm_weights).mean()  # B x nP x 1
     return weighted_loss
 
-def is_point_inside_voxel_grid(points_world: torch.Tensor, volumes: Volumes):
+def is_point_inside_voxel_grid(points_world: torch.Tensor, volumes: Volumes) -> torch.BoolTensor:
     """
     Checks if 3D points are inside the spatial bounds of a PyTorch3D Volumes object.
 
@@ -37,14 +38,28 @@ def is_point_inside_voxel_grid(points_world: torch.Tensor, volumes: Volumes):
     # 1. Transform the points to local coordinate frame
     points_local = volumes.world_to_local_coords(points_world)
 
-    # 3. Check if points are within the valid normalized range [-1, 1] for all axes
-    # The grid_sample function in PyTorch uses this range internally.
-    is_inside = (points_local >= -1.0) & (points_local <= 1.0)
+    B, N, C = points_local.shape
+
+    # F.grid_sample expects grid coordinates in (x, y, z) order matching (W, H, D)
+    # Our voxel is (B, C, depth, height, width)
+    # So we need to reorder: (x, y, z) -> (z, y, x) for grid_sample
+    grid = points_local.view(B, N, 1, 1, 3)
+    grid = grid[..., [2, 1, 0]]  # Flip to match grid_sample's coordinate system
     
-    # A point is inside the *volume's bounds* only if it's inside on all 3 axes
-    is_inside_volume = torch.all(is_inside, dim=-1)
+    # Sample from voxel
+    # Output shape: (B, 1, N, 1, 1)
+    sampled = F.grid_sample(
+        volumes.densities(), 
+        grid, 
+        mode='nearest',  # No interpolation
+        padding_mode='zeros',  # Values outside voxel are 0
+        align_corners=True
+    )
     
-    return is_inside_volume
+    # Reshape to (B, N, 1)
+    values = sampled.view(B, N, 1) > 0.5
+    
+    return values
 
 def partComposition(predParts, cuboid_sampler):
     # B x nParts x 10
@@ -87,9 +102,7 @@ def transform_samples(samples, predParts):
 
 def normalize_weights(imp_weights):
     # B x nP x 1
-    totWeights = (torch.sum(imp_weights, dim=1) + 1e-6).repeat(
-        1, imp_weights.size(1), 1
-    )
+    totWeights = (torch.sum(imp_weights, dim=1, keepdim=True) + 1e-6)
     norm_weights = imp_weights / totWeights
     return norm_weights
 

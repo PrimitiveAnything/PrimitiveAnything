@@ -25,28 +25,31 @@ from modules.config_utils import get_args
 
 from dataloaders.shapenet import R2N2ShapeNetDataset
 from models.original import Network
+from tqdm import tqdm
 
 torch.manual_seed(0)
 
 
 def train(dataloader, netPred, reward_shaper, optimizer, iter, params, logger, device):
     # Get batch
-    for batch in dataloader:
+    netPred.train()
+    progress_bar = tqdm(dataloader, desc="Epoch progress", leave=False)
+    for batch in progress_bar:
         inputVol, sampledPoints = batch
         inputVol = inputVol.to(device)
         sampledPoints = sampledPoints.to(device)
 
-        predParts, stocastic_actions = netPred.forward(inputVol)  ## B x nPars*11
+        predParts, stocastic_actions = netPred.forward(inputVol.densities())  ## B x nPars*11
         predParts = predParts.view(predParts.size(0), params.nParts, 12)
 
         optimizer.zero_grad()
-        cov_loss = coverage_loss(sampledPoints, predParts)
-        cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol)
+        cov_loss = coverage_loss(sampledPoints, predParts) # (B, N, 1)
+        cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol) # (B, N, 1)
         loss = cov_loss + params.chamferLossWt * cons_loss
 
+        mean_reward = None
         if params.prune == 1:
             rewards = []
-            mean_reward = 0
             reward = -1 * loss.view(-1, 1).data
             for i, action in enumerate(stocastic_actions):
                 shaped_reward = reward - params.nullReward * torch.sum(action.data)
@@ -61,11 +64,16 @@ def train(dataloader, netPred, reward_shaper, optimizer, iter, params, logger, d
                 logger.add_scalar(
                     "{}/prob".format(i), predParts[:, i, 10].data.mean(), iter
                 )
+        
+        # Display metrics
+        progress_bar.set_postfix_str(
+            f"Total Loss: {loss.item():.4f}\tCoverage Loss: {cov_loss.item():.4f}\tConsistency Loss: {cons_loss.item():.4f}"
+        )
 
         loss.backward()
         optimizer.step()
 
-    return loss.item(), cov_loss, cons_loss, mean_reward
+    return loss.item(), cov_loss.item(), cons_loss.item(), mean_reward
 
 
 def main():
@@ -102,7 +110,7 @@ def main():
         n_sample_points=params.nSamplePoints,
     )
     train_dataloader = DataLoader(
-        train_dataset, batch_size=params.batchSize, shuffle=True, num_workers=4
+        train_dataset, batch_size=params.batchSize, shuffle=True, num_workers=4, collate_fn=train_dataset.collate_fn
     )
     test_dataset = R2N2ShapeNetDataset(
         partition="test",
@@ -111,7 +119,7 @@ def main():
         n_sample_points=params.nSamplePoints,
     )
     test_dataloader = DataLoader(
-        test_dataset, batch_size=params.batchSize, shuffle=False, num_workers=4
+        test_dataset, batch_size=params.batchSize, shuffle=False, num_workers=4, collate_fn=train_dataset.collate_fn
     )
 
     # Set device
@@ -155,7 +163,7 @@ def main():
 
     # Train the model
     print("Iter\tErr\tTSDF\tChamf\tMeanRe")
-    for iter in range(params.numTrainIter):
+    for iter in tqdm(range(params.numTrainIter), desc='Training progress'):
         loss, coverage, consistency, mean_reward = train(
             train_dataloader, netPred, reward_shaper, optimizer, iter, params, logger, device
         )
@@ -166,7 +174,7 @@ def main():
         )
 
         # Visualize results
-        if iter % params.visIter == 0:
+        if iter % params.visIter == 0 and False:
             reshapeSize = torch.Size(
                 [
                     params.batchSizeVis,
@@ -177,7 +185,7 @@ def main():
                 ]
             )
 
-            for batch in test_dataloader:
+            for batch in tqdm(test_dataloader, desc='Validation progress', leave=False):
                 sample, tsdfGt, sampledPoints = batch
 
                 sampledPoints = sampledPoints[0 : params.batchSizeVis].cuda()

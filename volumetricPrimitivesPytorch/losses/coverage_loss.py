@@ -27,7 +27,9 @@ def coverage_loss(sampledPoints, predParts):  ## coverage loss
 
     existence_all = torch.cat(existence_weights, dim=2)
     tsdf_all = torch.cat(tsdfParts, dim=2) + existence_all
+    # Get the min coverage loss across parts
     tsdf_final = -1 * F.max_pool1d(-1 * tsdf_all, kernel_size=nParts)  # B x nP
+    tsdf_final = tsdf_final.mean()
     return tsdf_final
 
 
@@ -48,7 +50,7 @@ def cuboid_tsdf(sample_points, shape):
     nP = sample_points.size(1)
     shape_rep = shape.repeat(1, nP, 1)
     tsdf = torch.abs(sample_points) - shape_rep
-    tsdfSq = F.relu(tsdf).pow(2).sum(dim=2)
+    tsdfSq = F.relu(tsdf).pow(2).sum(dim=2, keepdim=True)
     return tsdfSq  ## Batch_size x nP x 1
 
 

@@ -115,13 +115,14 @@ class ProbPredModule(nn.Module):
     x = self.probLayer(feature)
     x = x * self.probLrDecay
     x = self.sigmoid(x)
+    x = x.view(feature.size(0), -1)
 
-    stocastic_outputs = x.view(feature.size(0), -1).bernoulli()
+    stocastic_outputs = x.bernoulli()
     # x = Variable(stocastic_outputs.data.clone())
     selections = stocastic_outputs
     if self.prune ==0:
       selections = Variable(torch.FloatTensor(x.size()).fill_(1).type_as(x.data))
-    return torch.cat([x ,selections], dim=1), stocastic_outputs
+    return torch.concat([x, stocastic_outputs], dim=1), stocastic_outputs
 
 
 class PrimitivePredModule(nn.Module):
@@ -133,10 +134,10 @@ class PrimitivePredModule(nn.Module):
     self.probPred = ProbPredModule(params, outChannelsV, biasTerm)
 
   def forward(self, feature):
-    shape = self.shapePred(feature)
-    quat = self.quatPred(feature)
-    transPred = self.transPred(feature)
-    probPred, stocastic_outputs = self.probPred(feature)
+    shape = self.shapePred(feature) # (B, 3)
+    quat = self.quatPred(feature) # (B, 4)
+    transPred = self.transPred(feature) # (B, 3)
+    probPred, stocastic_outputs = self.probPred(feature) # (B, 1), (B, 1)
     output = torch.cat([shape, transPred, quat, probPred], dim = 1)
     return output, stocastic_outputs
 

@@ -117,7 +117,7 @@ class CuboidSurface(nn.Module):
     # dims is bs x 1 x 3
     area = self.cuboidAreaModule(dims) # bs x 1 x 1
     dimsInv = dims.pow(-1)
-    dimsInvNorm = dimsInv.sum(2).repeat(1, 1, 3)
+    dimsInvNorm = dimsInv.sum(2, keepdim=True).repeat(1, 1, 3)
     normWeights = 3 * (dimsInv / dimsInvNorm)
 
     widthWt, heightWt, depthWt = torch.chunk(normWeights, chunks=3, dim=2)

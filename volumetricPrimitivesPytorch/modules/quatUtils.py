@@ -97,7 +97,7 @@ def hamilton_product(q1, q2):
     q2_permute_3 = q2_permute_3 * np.sign(inds[i][3] + 0.01)
     q2_permute = torch.stack([q2_permute_0, q2_permute_1, q2_permute_2, q2_permute_3], dim=2)
 
-    q1q2_v1 = torch.sum(q1 * q2_permute, dim=2)
+    q1q2_v1 = torch.sum(q1 * q2_permute, dim=2, keepdim=True)
     q1_q2_prods.append(q1q2_v1)
 
   q_ham = torch.cat(q1_q2_prods, dim=2)
