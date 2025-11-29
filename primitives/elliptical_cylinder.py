@@ -80,4 +80,4 @@ class EllipticalCylinderSurface:
         return outside_dist + inside_dist
 
     def __call__(self, points):
-        return self.elliptical_cylinder_sdf(points), self.min_xyz, self.max_xyz
+        return self.elliptical_cylinder_sdf(points)
