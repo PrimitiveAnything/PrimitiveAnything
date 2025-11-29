@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from modules.get_primitives import get_samples, get_primitives
+from utils.get_primitives import get_samples, get_primitives
 from primitives import (
     CuboidSurface,
     EllipsoidSurface,
@@ -16,7 +16,7 @@ from primitives import (
 def test_get_samples_shape():
     B = 4
     emb = torch.zeros((B, 1, 23))
-    out = get_samples(emb)
+    out, _ = get_samples(emb)
     assert out.shape == (B, 1, 11), "Output must be B x 1 x 11"
 
 
@@ -30,7 +30,7 @@ def test_get_samples_class_argmax():
     # logits for 3 classes at positions 20:23
     emb[:, :, 20:] = torch.tensor([[-1.0, 5.0, 0.0]])  # class=1 is max
 
-    out = get_samples(emb)
+    out, _ = get_samples(emb)
     assert torch.all(out[:, :, 10] == 1), "Class index should be argmax(logits)"
 
 
@@ -45,8 +45,8 @@ def test_get_samples_sampling_effect():
     emb[:, :, 0:3] = 1.0
     emb[:, :, 3:6] = 1.0
 
-    out1 = get_samples(emb)
-    out2 = get_samples(emb)
+    out1, _ = get_samples(emb)
+    out2, _ = get_samples(emb)
 
     # random sampling should differ
     assert not torch.allclose(out1[:, :, :3], out2[:, :, :3]), \

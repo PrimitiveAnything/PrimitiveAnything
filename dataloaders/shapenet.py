@@ -29,11 +29,11 @@ import sys
 import os
 
 class ShapeNetDataset(Dataset):
-    def __init__(self, shapenet_dir: str = "./data/shapenet", n_sample_points: int = 1000):
+    def __init__(self, shapenet_dir: str = "./data/shapenet/", n_sample_points: int = 1000):
         self.shapenet_dir = shapenet_dir
         self.n_sample_points = n_sample_points
 
-        self.shapenet_dataset = ShapeNetCore(self.shapenet_dir)
+        self.shapenet_dataset = ShapeNetCore(self.shapenet_dir, version=2)
 
     def __len__(self):
         return len(self.shapenet_dataset)
