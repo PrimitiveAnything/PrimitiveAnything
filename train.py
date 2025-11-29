@@ -11,7 +11,7 @@ from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 from models.prim_transformer import PrimitiveTransformerQuaternion
 from dataloaders.cadConfigsChamfer import SimpleCadData
-
+from dataloaders.shapenet import ShapeNetDataset
 from losses import coverage_loss, consistency_loss
 
 import modules.netUtils as netUtils
@@ -102,24 +102,22 @@ def main():
     logger = SummaryWriter("logs/{}/".format(params.name))
 
     # Load dataset
-    train_dataset = R2N2ShapeNetDataset(
-        partition="train",
-        r2n2_shapenet_dir=params.modelsDataDir,
-        synsets=params.synset,
-        n_sample_points=params.nSamplePoints,
-    )
+    train_dataset = ShapeNetDataset(
+                    shapenet_dir="./data/shapenet/",
+                    n_sample_points=10000,  # Match Michelangelo's training
+                    )
     train_dataloader = DataLoader(
-        train_dataset, batch_size=params.batchSize, shuffle=True, num_workers=4, collate_fn=train_dataset.collate_fn
+        train_dataset, batch_size=params.batchSize, shuffle=True, num_workers=4
     )
-    test_dataset = R2N2ShapeNetDataset(
-        partition="test",
-        r2n2_shapenet_dir=params.modelsDataDir,
-        synsets=params.synset,
-        n_sample_points=params.nSamplePoints,
-    )
-    test_dataloader = DataLoader(
-        test_dataset, batch_size=params.batchSize, shuffle=False, num_workers=4, collate_fn=train_dataset.collate_fn
-    )
+    # test_dataset = R2N2ShapeNetDataset(
+    #     partition="test",
+    #     r2n2_shapenet_dir=params.modelsDataDir,
+    #     synsets=params.synset,
+    #     n_sample_points=params.nSamplePoints,
+    # )
+    # test_dataloader = DataLoader(
+    #     test_dataset, batch_size=params.batchSize, shuffle=False, num_workers=4, collate_fn=train_dataset.collate_fn
+    # )
 
     # Set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

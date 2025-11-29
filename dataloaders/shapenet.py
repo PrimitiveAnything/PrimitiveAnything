@@ -29,7 +29,7 @@ import sys
 import os
 
 class ShapeNetDataset(Dataset):
-    def __init__(self, shapenet_dir: str = "./data/shapenet/", n_sample_points: int = 1000):
+    def __init__(self, shapenet_dir: str = "./data/shapenet/", n_sample_points: int = 10000):
         self.shapenet_dir = shapenet_dir
         self.n_sample_points = n_sample_points
 
@@ -44,6 +44,14 @@ class ShapeNetDataset(Dataset):
         surface_points, normals = sample_points_from_meshes(mesh, num_samples=self.n_sample_points, return_normals=True) # (N, 3)
         surface_points = surface_points.squeeze(0)
         normals = normals.squeeze(0)
+        min_vals = surface_points.min(dim=0)[0]  # (3,)
+        max_vals = surface_points.max(dim=0)[0]  # (3,)
+        
+        center = (min_vals + max_vals)/2
+        surface_points = surface_points-center
+        
+        scale = (max_vals - min_vals).max()
+        surface_points = surface_points / scale
 
         points_normals = torch.cat([surface_points, normals], dim=-1)
         return points_normals # (N, 6), where first three are x, y and z and last three are normals along each axis
