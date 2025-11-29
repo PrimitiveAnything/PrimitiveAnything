@@ -48,4 +48,4 @@ class EllipsoidSurface:
         return dist
     
     def __call__(self, points):
-        return self.ellipsoid_sdf(points), self.min_xyz, self.max_xyz
+        return self.ellipsoid_sdf(points)

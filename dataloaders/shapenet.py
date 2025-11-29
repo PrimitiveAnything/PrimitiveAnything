@@ -41,5 +41,9 @@ class ShapeNetDataset(Dataset):
     def __getitem__(self, index):
         model = self.shapenet_dataset[index]
         mesh = Meshes(verts=[model['verts']], faces=[model['faces']])
-        surface_points = sample_points_from_meshes(mesh, num_samples=self.n_sample_points).squeeze(0) # (N, 3)
-        return surface_points
+        surface_points, normals = sample_points_from_meshes(mesh, num_samples=self.n_sample_points, return_normals=True) # (N, 3)
+        surface_points = surface_points.squeeze(0)
+        normals = normals.squeeze(0)
+
+        points_normals = torch.cat([surface_points, normals], dim=-1)
+        return points_normals # (N, 6), where first three are x, y and z and last three are normals along each axis
