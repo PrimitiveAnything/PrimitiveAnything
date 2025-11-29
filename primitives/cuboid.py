@@ -4,11 +4,11 @@ from pytorch3d.transforms import quaternion_to_matrix
 
 class CuboidSurface:
 
-    def __init__(self, scale, quaternion, translation):
+    def __init__(self, scale, quaternion, translation, is_positive=True):
         self.scale = scale
         self.quaternion = quaternion
         self.translation = translation
-        self.is_positive = True
+        self.is_positive = is_positive
 
         self.min_xyz, self.max_xyz = self._get_bounds()
 
