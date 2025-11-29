@@ -27,3 +27,36 @@ def get_samples(embedding):
 
     return next_state
 
+def get_primitives(samples):
+    """
+    Input: samples, B x T x 11
+    Output: List[List[Primitives]]
+    """
+    B, T, _ = samples.shape
+
+    scale = samples[:, :, :3]
+    rotation = samples[:, :, 3:7]
+    translation = samples[:, :, 7:10]
+    prim_type = samples[:, :, 10].long()
+
+    all_batches = []
+
+    for b in range(B):
+        batch_list = []
+        for t in range(T):
+            prim = prim_type[b, t].item()
+
+            s = scale[b, t]
+            r = rotation[b, t]
+            tr = translation[b, t]
+
+            if prim == 0:
+                batch_list.append(CuboidSurface(s, r, tr))
+            elif prim == 1:
+                batch_list.append(EllipsoidSurface(s, r, tr))
+            else:
+                batch_list.append(EllipticalCylinderSurface(s, r, tr))
+
+        all_batches.append(batch_list)
+    
+    return all_batches
