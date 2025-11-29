@@ -2,7 +2,7 @@ import torch
 from pytorch3d.structures import Volumes
 import mcubes
 
-def compute_combined_sdf_from_primitives(grid_points: torch.Tensor, primitives: list[list[Primitive]]):
+def compute_combined_sdf_from_primitives(grid_points: torch.Tensor, primitives: list[list]):
     """
     Compute combined SDF for primitives represented as tensors.
     
@@ -71,7 +71,7 @@ def generate_mesh_from_volumes(volumes: Volumes):
     
     return vertices, faces
 
-def generate_volume_from_primitives(primitives: list[list[Primitive]], resolution=128):
+def generate_volume_from_primitives(primitives: list[list], resolution=128):
     """
     Generate a PyTorch3D Volumes object from primitives.
     

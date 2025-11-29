@@ -37,7 +37,7 @@ class EllipsoidSurface:
         rotation = quaternion_to_matrix(self.quaternion)
         # Transform to unit sphere space by dividing by scale
         points = points - self.translation
-        points = (rotation.tranpose(-2, -1) @ points.T).T
+        points = (rotation.transpose(-2, -1) @ points.T).T
         normalized_points = points / self.scale
 
         # Distance in normalized space

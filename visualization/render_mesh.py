@@ -4,7 +4,7 @@ from pytorch3d.structures import Meshes
 import torch
 
 
-def render_mesh(vertices, faces, device):
+def render_mesh(vertices, faces, output_filename, device):
     vertices, faces = [torch.from_numpy(x).to(device=device, dtype=torch.float) for x in (vertices, faces)]
 
     # Define texture
@@ -45,5 +45,5 @@ def render_mesh(vertices, faces, device):
     views = views.cpu().numpy()
 
     imageio.mimwrite(
-        'test_output.gif', [img for img in views], frame_duration=80, loop=0
+        output_filename, [img for img in views], frame_duration=80, loop=0
     )
