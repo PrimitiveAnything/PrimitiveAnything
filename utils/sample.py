@@ -1,8 +1,9 @@
 import torch
+from math import log, pi as PI, exp
 
 def get_log_probs(mean, logvar, sample):
     return -0.5 * (
-        torch.log(2 * torch.pi) +
+        log(2 * PI) +
         logvar +
         (sample - mean)**2 * torch.exp(-logvar)
     )

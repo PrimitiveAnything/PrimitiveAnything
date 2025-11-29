@@ -4,10 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import imageio
 from pytorch3d.transforms import quaternion_to_matrix
-from pytorch3d.structures import Volumes
+from pytorch3d.structures import Meshes, Volumes
+import pytorch3d.renderer
 import json
 import argparse
 import sys
+import mcubes
 
 
 def sdf_ellipsoid(points, center, scale):
@@ -180,25 +182,7 @@ def compute_combined_sdf_from_primitives(params_tensor, types_tensor, grid_point
     return combine_sdfs(sdf_values_list, is_negative_list)
 
 
-def marching_cubes_differentiable(sdf_volume, resolution, bbox_min=-1.0, bbox_max=1.0):
-    """
-    Extract mesh from SDF using torchmcubes library.
-    
-    sdf_volume: (resolution, resolution, resolution) tensor
-    resolution: int, grid resolution
-    bbox_min, bbox_max: scalar, bounding box extents
-    
-    Returns: vertices (V, 3), faces (F, 3)
-    """
-    # torchmcubes expects negative inside, positive outside (same as our SDF)
-    vertices, faces = marching_cubes(sdf_volume, 0.0)
-    
-    # Scale vertices from [0, resolution] to [bbox_min, bbox_max]
-    vertices = vertices / (resolution - 1) * (bbox_max - bbox_min) + bbox_min
-    
-    return vertices, faces
-
-def generate_volume_from_primitives(params_tensor, types_tensor, resolution=128, bbox_min=-1.5, bbox_max=1.5):
+def generate_volume_from_primitives(params_tensor, types_tensor, resolution=128, bbox_min=-3, bbox_max=3):
     """
     Generate a PyTorch3D Volumes object from primitives.
     
@@ -223,13 +207,13 @@ def generate_volume_from_primitives(params_tensor, types_tensor, resolution=128,
     
     # Convert SDF to occupancy (negative SDF = inside = 1, positive SDF = outside = 0)
     # We use a sigmoid to get smooth occupancy values
-    occupancy = torch.sigmoid(-sdf_values * 10.0)  # Scale factor controls sharpness
+    occupancy = (sdf_values > 0).float()  # Scale factor controls sharpness
     occupancy_volume = occupancy.reshape(resolution, resolution, resolution)
     
     # Create Volumes object
     # densities should be of shape (batch, density_dim, depth, height, width)
     # We'll use batch size of 1 and density_dim of 1
-    densities = occupancy_volume.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, D, H, W)
+    densities = occupancy_volume.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, H, W, D)
     
     # Calculate voxel size based on bbox and resolution
     voxel_size = (bbox_max - bbox_min) / (resolution - 1)
@@ -251,7 +235,7 @@ def generate_volume_from_primitives(params_tensor, types_tensor, resolution=128,
     return volumes
 
 
-def generate_mesh_from_primitives(params_tensor, types_tensor, resolution=128, bbox_min=-1.5, bbox_max=1.5):
+def generate_mesh_from_volumes(volumes: Volumes):
     """
     Generate a mesh from primitives using marching cubes.
     
@@ -262,22 +246,55 @@ def generate_mesh_from_primitives(params_tensor, types_tensor, resolution=128, b
     
     Returns: vertices (V, 3), faces (F, 3)
     """
-    # Create 3D grid
-    x = torch.linspace(bbox_min, bbox_max, resolution)
-    y = torch.linspace(bbox_min, bbox_max, resolution)
-    z = torch.linspace(bbox_min, bbox_max, resolution)
-    
-    grid_x, grid_y, grid_z = torch.meshgrid(x, y, z, indexing='ij')
-    grid_points = torch.stack([grid_x.flatten(), grid_y.flatten(), grid_z.flatten()], dim=-1)
-    
-    # Compute combined SDF
-    sdf_values = compute_combined_sdf_from_primitives(params_tensor, types_tensor, grid_points)
-    sdf_volume = sdf_values.reshape(resolution, resolution, resolution)
-    
     # Extract mesh using marching cubes
-    vertices, faces = marching_cubes_differentiable(sdf_volume, resolution, bbox_min, bbox_max)
+    volume_array = volumes.densities().cpu().numpy()
+    vertices, faces = mcubes.marching_cubes(volume_array.squeeze(), isovalue=0.5)
     
     return vertices, faces
+
+def render_mesh(vertices, faces, device):
+    vertices, faces = [torch.from_numpy(x).to(device=device, dtype=torch.float) for x in (vertices, faces)]
+
+    # Define texture
+    textures_rgb = torch.ones_like(vertices, device=device) * torch.tensor([0.6, 0.6, 0.3], device=device)
+    textures = pytorch3d.renderer.TexturesVertex([textures_rgb])
+
+    # Assemble Mesh
+    mesh = Meshes(
+        [vertices], [faces], textures
+    )
+
+    # Define cameras
+    n_views = 10
+    distance = 100
+    object_center = vertices.mean(dim=-2)
+    elevations = 30 # torch.linspace(0, 2 * torch.pi, n_views, device=device).sin() * 30
+    rotation_degrees = torch.linspace(-180, 180, n_views, device=device)
+    R, T = pytorch3d.renderer.cameras.look_at_view_transform(
+        dist=distance, elev=elevations, azim=rotation_degrees, device=device, at=object_center.unsqueeze(0),
+    ) # (N, 3, 3), (N, 3)
+    cameras = pytorch3d.renderer.cameras.FoVPerspectiveCameras(
+        R=R, T=T, fov=60, device=device,
+    )
+
+    # Define lights
+    lights = pytorch3d.renderer.PointLights(location=[[0, 0, distance]], device=device)
+
+    # Initialize renderer
+    raster_settings = pytorch3d.renderer.RasterizationSettings(
+        image_size=256, blur_radius=0.0, faces_per_pixel=1,
+    )
+    renderer = pytorch3d.renderer.MeshRenderer(
+        rasterizer=pytorch3d.renderer.MeshRasterizer(raster_settings=raster_settings),
+        shader=pytorch3d.renderer.HardPhongShader(device=device, lights=lights),
+    )
+    views = renderer(mesh.extend(n_views), cameras=cameras, lights=lights)
+    views = (views[:, :, :, :3] * 255).to(torch.uint8)
+    views = views.cpu().numpy()
+
+    imageio.mimwrite(
+        'test_output.gif', [img for img in views], frame_duration=80, loop=0
+    )
 
 
 def load_primitives_from_json(json_path):
@@ -313,7 +330,6 @@ def load_primitives_from_json(json_path):
         'neg_elliptical_cylinder': 5
     }
     
-    n_primitives = len(data)
     params_list = []
     types_list = []
     
@@ -333,6 +349,10 @@ def load_primitives_from_json(json_path):
         # Validate that we have exactly 3 scale values
         if len(scale) != 3:
             raise ValueError(f"Scale must have exactly 3 values [x, y, z], got {len(scale)}")
+        if len(rotation) != 4:
+            raise ValueError(f"Rotation must have exactly 4 values, got {len(scale)}")
+        if len(translation) != 3:
+            raise ValueError(f"Translation must have exactly 3 values, got {len(scale)}")
         
         params = scale + rotation + translation  # List concatenation
         params_list.append(params)
@@ -397,9 +417,14 @@ def main():
         sys.exit(1)
     
     # Generate mesh
-    print("Generating mesh from primitives...")
-    vertices, faces = generate_mesh_from_primitives(params_tensor, types_tensor, resolution=args.resolution)
+    print("Generating volume from primitives...")
+    volumes = generate_volume_from_primitives(params_tensor, types_tensor, resolution=args.resolution)
+
+    # Rendering volume
+    vertices, faces = generate_mesh_from_volumes(volumes)
     print(f"Generated mesh with {vertices.shape[0]} vertices and {faces.shape[0]} faces")
+    render_mesh(vertices, faces, device='cuda')
+
 
 
 if __name__ == "__main__":
