@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
-
+from models.prim_transformer import PrimitiveTransformerQuaternion
 from dataloaders.cadConfigsChamfer import SimpleCadData
 
 from losses import coverage_loss, consistency_loss
@@ -22,7 +22,6 @@ import modules.marching_cubes as mc
 import modules.meshUtils as mUtils
 from modules.meshUtils import savePredParts
 from modules.config_utils import get_args
-
 from dataloaders.shapenet import R2N2ShapeNetDataset
 from models.original import Network
 from tqdm import tqdm
@@ -126,8 +125,15 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # Initialize model
-    netPred = Network(params)
-    
+
+    netPred = PrimitiveTransformerQuaternion(
+        n_primitives=params.nParts,
+        d_model=256,
+        n_heads=8,
+        n_layers=6,
+        n_classes=len(params.primTypes)
+    )
+        
     if params.usePretrain:
         # Load model weights
         updateShapeWtFunc = netUtils.scaleWeightsFunc(
