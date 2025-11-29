@@ -26,6 +26,10 @@ def get_samples(embedding):
     next_state[:, :, 7:10] = translation 
     next_state[:, :, 10] = torch.argmax(probs, dim=-1)
 
+    scale_probs = torch.sum(scale_probs, dim=-1)
+    quaternion_probs = torch.sum(quaternion_probs, dim=-1)
+    translation_probs = torch.sum(translation_probs, dim=-1)
+
     return next_state, scale_probs + quaternion_probs + translation_probs
 
 def get_primitives(samples):
