@@ -8,8 +8,42 @@ class CuboidSurface:
         self.scale = scale
         self.quaternion = quaternion
         self.translation = translation
+        self.is_positive = True
 
-    def sdf_cuboid(self, points):
+        self.min_xyz, self.max_xyz = self._get_bounds()
+
+    def _get_bounds(self):
+        """
+        Returns (min_xyz, max_xyz) of the cuboid in WORLD coordinates.
+        Useful for voxelization.
+        """
+        # 1. Get the 8 corners in local space
+        half = self.scale / 2.0
+        corners_local = torch.tensor([
+            [-half[0], -half[1], -half[2]],
+            [-half[0], -half[1],  half[2]],
+            [-half[0],  half[1], -half[2]],
+            [-half[0],  half[1],  half[2]],
+            [ half[0], -half[1], -half[2]],
+            [ half[0], -half[1],  half[2]],
+            [ half[0],  half[1], -half[2]],
+            [ half[0],  half[1],  half[2]],
+        ], dtype=self.scale.dtype, device=self.scale.device)  # (8,3)
+
+        # 2. Rotate corners to world space
+        R = quaternion_to_matrix(self.quaternion)   # (3,3)
+        corners_world = corners_local @ R.T          # local → world
+
+        # 3. Translate
+        corners_world = corners_world + self.translation   # (8,3)
+
+        # 4. AABB min/max
+        min_xyz = corners_world.min(dim=0)[0]
+        max_xyz = corners_world.max(dim=0)[0]
+
+        return min_xyz, max_xyz
+
+    def cuboid_sdf(self, points):
         """
         SDF for a cuboid (box).
         points: (N, 3) tensor of query points
@@ -34,3 +68,6 @@ class CuboidSurface:
         inside_dist = torch.clamp(torch.max(q, dim=-1)[0], max=0.0)
         
         return outside_dist + inside_dist
+    
+    def __call__(self, points):
+        return self.cuboid_sdf(points), self.min_xyz, self.max_xyz

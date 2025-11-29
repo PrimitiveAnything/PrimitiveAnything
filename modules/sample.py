@@ -12,9 +12,13 @@ def get_log_probs(mean, std_dev, sample):
     return -0.5 * (torch.log(2 * torch.pi * var) +
                    ((sample - mean) ** 2) / var)
 
-def get_sample_and_probs(mean, std_dev):
+def get_sample(mean, std_dev):
     eps = torch.randn_like(mean)
     sample = mean + eps * std_dev
+    return sample
+
+def get_sample_and_probs(mean, std_dev):
+    sample = get_sample
     probs = get_probs(mean, std_dev, sample)
     log_probs = get_log_probs(mean, std_dev, sample)
     return sample, probs, log_probs

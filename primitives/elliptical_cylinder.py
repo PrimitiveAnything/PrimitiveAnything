@@ -8,8 +8,38 @@ class EllipticalCylinderSurface:
         self.scale = scale
         self.quaternion = quaternion
         self.translation = translation
+        self.is_positive = True
 
-    def sdf_elliptical_cylinder(self, points):
+        self.min_xyz, self.max_xyz = self._get_bounds()
+
+    def _get_bounds(self):
+        # radii and height
+        rx, h, rz = self.scale
+        R = quaternion_to_matrix(self.quaternion)   # (3,3)
+
+        # --- 1. Height (local y-axis)
+        # world-space contribution of +/- h/2 along local Y
+        # height_half[i] = abs(R[i,1]) * (h/2)
+        height_half = torch.abs(R[:, 1]) * (h / 2)
+
+        # --- 2. Ellipse in XZ (local)
+        # Extreme point along world axis i:
+        # ellipse_half[i] = sqrt((rx * R[i,0])^2 + (rz * R[i,2])^2)
+        ellipse_half = torch.sqrt(
+            (rx * R[:, 0]) ** 2 +
+            (rz * R[:, 2]) ** 2
+        )
+
+        # Total half extents
+        half = ellipse_half + height_half  # (3,)
+
+        # AABB
+        min_xyz = self.translation - half
+        max_xyz = self.translation + half
+
+        return min_xyz, max_xyz
+
+    def elliptical_cylinder_sdf(self, points):
         """
         SDF for an elliptical cylinder (aligned with local y-axis).
         points: (N, 3) tensor of query points
@@ -48,3 +78,6 @@ class EllipticalCylinderSurface:
         inside_dist = torch.clamp(torch.max(d, dim=-1)[0], max=0.0)
         
         return outside_dist + inside_dist
+
+    def __call__(self, points):
+        return self.elliptical_cylinder_sdf(points), self.min_xyz, self.max_xyz

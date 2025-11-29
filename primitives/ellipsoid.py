@@ -8,6 +8,25 @@ class EllipsoidSurface:
         self.scale = scale
         self.quaternion = quaternion
         self.translation = translation
+        self.is_positive = True
+
+        self.min_xyz, self.max_xyz = self._get_bounds()
+
+    def _get_bounds(self):
+        # Get rotation matrix
+        R = quaternion_to_matrix(self.quaternion)  # (3,3)
+
+        # Absolute rotation
+        absR = torch.abs(R)
+
+        # Half-size of AABB (3,)
+        half_extents = absR @ self.scale
+
+        # AABB = center ± half_extents
+        min_xyz = self.translation - half_extents
+        max_xyz = self.translation + half_extents
+
+        return min_xyz, max_xyz
 
     def ellipsoid_sdf(self, points):
         """
@@ -27,3 +46,6 @@ class EllipsoidSurface:
         # This approximation works well for most cases
         dist = (dist_normalized - 1.0) * torch.min(self.scale)
         return dist
+    
+    def __call__(self, points):
+        return self.ellipsoid_sdf(points), self.min_xyz, self.max_xyz
