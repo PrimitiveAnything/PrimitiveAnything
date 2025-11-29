@@ -13,7 +13,7 @@ def load_model():
     # print(model_config)
     if hasattr(model_config, "model"):
         model_config = model_config.model
-    ckpt_path = "./ckpt/shapevae-256.ckpt"
+    ckpt_path = os.path.join(os.path.dirname(__file__), "ckpt/shapevae-256.ckpt")
 
     model = instantiate_from_config(model_config, ckpt_path=ckpt_path)
     # model = model.cuda()
