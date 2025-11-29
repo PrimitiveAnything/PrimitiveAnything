@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
-from .primitives import CuboidSurface, EllipsoidSurface, EllipticalCylinderSurface
-from sample import get_sample, get_sample_and_probs
+from primitives import CuboidSurface, EllipsoidSurface, EllipticalCylinderSurface
+from .sample import get_sample, get_sample_and_probs
 
 def get_samples(embedding):
     """
