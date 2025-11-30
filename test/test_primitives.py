@@ -64,9 +64,9 @@ def test_get_primitives_correct_classes():
     """
     samples = torch.zeros((1, 3, 11))
 
-    samples[0, 0, 10] = 0  # cuboid
-    samples[0, 1, 10] = 1  # ellipsoid
-    samples[0, 2, 10] = 2  # elliptical cylinder
+    samples[0, 0, 10] = 1  # cuboid
+    samples[0, 1, 10] = 2  # ellipsoid
+    samples[0, 2, 10] = 3  # elliptical cylinder
 
     prims = get_primitives(samples)[0]
 
@@ -84,7 +84,7 @@ def test_get_primitives_parameter_pass_through():
     samples[0, 0, :3] = torch.tensor([2.0, 3.0, 4.0])  # scale
     samples[0, 0, 3:7] = torch.tensor([0.1, 0.2, 0.3, 0.4])  # rotation
     samples[0, 0, 7:10] = torch.tensor([9.0, 8.0, 7.0])  # translation
-    samples[0, 0, 10] = 0  # CuboidSurface
+    samples[0, 0, 10] = 1  # CuboidSurface
 
     prim = get_primitives(samples)[0][0]
 
@@ -98,6 +98,7 @@ def test_get_primitives_batching():
     Ensure batching returns the correct nested list structure.
     """
     samples = torch.zeros((2, 4, 11))  # 2 batches, 4 parts each
+    samples[:, :, 10] = 1
     prims = get_primitives(samples, 4)
 
     assert len(prims) == 2
@@ -112,8 +113,8 @@ def test_get_primitives_padding_short_sequence():
     samples = torch.zeros((B, T, 11))
     
     # Set primitive types: first Cuboid, second Ellipsoid
-    samples[0, 0, 10] = 0
-    samples[0, 1, 10] = 1
+    samples[0, 0, 10] = 1
+    samples[0, 1, 10] = 2
 
     primitives = get_primitives(samples, max_len)
     
@@ -130,7 +131,7 @@ def test_get_primitives_no_padding_needed():
     # Batch of 1, sequence length 3, max length 3
     B, T, max_len = 1, 3, 3
     samples = torch.zeros((B, T, 11))
-    samples[0, :, 10] = torch.tensor([0, 1, 2])  # Cuboid, Ellipsoid, EllipticalCylinder
+    samples[0, :, 10] = torch.tensor([1, 2, 3])  # Cuboid, Ellipsoid, EllipticalCylinder
 
     primitives = get_primitives(samples, max_len)
     

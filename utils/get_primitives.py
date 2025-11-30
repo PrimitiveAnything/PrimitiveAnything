@@ -30,7 +30,8 @@ def get_samples(embedding):
     translation_probs = torch.sum(translation_probs, dim=-1)
 
     log_probs = scale_probs + quaternion_probs + translation_probs
-
+    log_probs = log_probs.unsqueeze(-1)
+    
     assert log_probs.shape == (next_state.shape[0], 1, 1)
 
     return next_state, log_probs
