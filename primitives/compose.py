@@ -126,8 +126,8 @@ def generate_volume_from_primitives(primitives_batch: list[list], resolution=128
         for primitive in primitive_list:
             xyz_min.append(primitive.min_xyz)
             xyz_max.append(primitive.max_xyz) 
-    xyz_min = torch.min(*xyz_min)
-    xyz_max = torch.max(*xyz_max)
+    xyz_min = torch.min(torch.stack(xyz_min), dim=0)[0]
+    xyz_max = torch.max(torch.stack(xyz_max), dim=0)[0]
 
     # Create grid points to evaluate on the combined SDF
     x = torch.linspace(xyz_min[0].item(), xyz_max[0].item(), resolution + 1)
