@@ -15,7 +15,6 @@ def get_samples(embedding):
     probs = F.softmax(embedding[:, :, 20:], dim=-1)
 
     next_state = torch.empty((B, nPart, 11), dtype=torch.float64, device=embedding.device)
-
     
     scale, scale_probs = get_sample_and_probs(scale_mean, scale_log_var)
     quaternion, quaternion_probs = get_sample_and_probs(rot_mean, rot_log_var)
@@ -30,7 +29,11 @@ def get_samples(embedding):
     quaternion_probs = torch.sum(quaternion_probs, dim=-1)
     translation_probs = torch.sum(translation_probs, dim=-1)
 
-    return next_state, scale_probs + quaternion_probs + translation_probs
+    log_probs = scale_probs + quaternion_probs + translation_probs
+
+    assert log_probs.shape == (next_state.shape[0], 1, 1)
+
+    return next_state, log_probs
 
 def get_primitives(samples, max_prim_length=8):
     """
@@ -58,21 +61,24 @@ def get_primitives(samples, max_prim_length=8):
             if t >= max_prim_length:
                 break
             if prim == 0:
-                batch_list.append(CuboidSurface(s, r, tr))
+                batch_list.append(EmptySurface())
+                break
             elif prim == 1:
-                batch_list.append(EllipsoidSurface(s, r, tr))
+                batch_list.append(CuboidSurface(s, r, tr))
             elif prim == 2:
-                batch_list.append(EllipticalCylinderSurface(s, r, tr))
+                batch_list.append(EllipsoidSurface(s, r, tr))
             elif prim == 3:
-                batch_list.append(CuboidSurface(s, r, tr, is_positive=False))
+                batch_list.append(EllipticalCylinderSurface(s, r, tr))
             elif prim == 4:
-                batch_list.append(EllipsoidSurface(s, r, tr, is_positive=False))
+                batch_list.append(CuboidSurface(s, r, tr, is_positive=False))
             elif prim == 5:
+                batch_list.append(EllipsoidSurface(s, r, tr, is_positive=False))
+            elif prim == 6:
                 batch_list.append(EllipticalCylinderSurface(s, r, tr, is_positive=False))
             else:
                 raise ValueError(f'Invalid primitive type code {prim}. Expected number between 0 and 5')
 
-        padding = [EmptySurface()] * (max_prim_length - T)
+        padding = [EmptySurface()] * (max_prim_length - len(batch_list))
         batch_list.extend(padding)
         all_batches.append(batch_list)
     

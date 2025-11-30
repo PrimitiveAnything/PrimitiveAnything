@@ -174,6 +174,8 @@ class PrimitiveTransformerQuaternion(nn.Module):
         self,
         point_cloud: torch.Tensor,
         point_mask: Optional[torch.Tensor] = None,
+        point_features: Optional[torch.Tensor] = None,
+        output_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass.
@@ -192,14 +194,14 @@ class PrimitiveTransformerQuaternion(nn.Module):
         batch_size = point_cloud.shape[0]
         
         # Extract point features
-        with torch.no_grad():
-            pc_head, pc_embed = self.michelangelo(shape=point_cloud)
-        
-        # Project features (trainable)
-        point_features = torch.cat([
-            self.to_cond_dim_head(pc_head),      # (B, d_model)
-            self.to_cond_dim(pc_embed)            # (B, seq_len, d_model)
-        ], dim=-2) 
+        if not point_features:
+            with torch.no_grad():
+                pc_head, pc_embed = self.michelangelo(shape=point_cloud)
+            # Project features (trainable)
+            point_features = torch.cat([
+                self.to_cond_dim_head(pc_head),      # (B, d_model)
+                self.to_cond_dim(pc_embed)            # (B, seq_len, d_model)
+            ], dim=-2)
         
         # Project point features
         # point_features = self.point_feature_proj(point_features)
@@ -225,7 +227,7 @@ class PrimitiveTransformerQuaternion(nn.Module):
         decoded = self.transformer_decoder(
             tgt=queries,
             memory=point_features,
-            memory_key_padding_mask=memory_key_padding_mask
+            memory_key_padding_mask=memory_key_padding_mask,
         )
         
         # Remove SOS token
@@ -239,19 +241,19 @@ class PrimitiveTransformerQuaternion(nn.Module):
         eos_logits = self.eos_head(primitive_features)
         
         # Post-process to ensure positive σ
-        scale_params = self._postprocess_params(scale_params)
-        rotation_params = self._postprocess_params(rotation_params)
-        translation_params = self._postprocess_params(translation_params)
+        # scale_params = self._postprocess_params(scale_params)
+        # rotation_params = self._postprocess_params(rotation_params)
+        # translation_params = self._postprocess_params(translation_params)
         
-        return scale_params, rotation_params, translation_params, class_logits, eos_logits
+        return scale_params, rotation_params, translation_params, class_logits, eos_logits, point_features
     
-    def _postprocess_params(self, params: torch.Tensor) -> torch.Tensor:
-        """Ensure σ values are positive using softplus."""
-        dim = params.shape[-1]
-        half = dim // 2
-        mu = params[..., :half]
-        sigma = F.softplus(params[..., half:]) + 1e-6  # Add small constant for numerical stability
-        return torch.cat([mu, sigma], dim=-1)
+    # def _postprocess_params(self, params: torch.Tensor) -> torch.Tensor:
+    #     """Ensure σ values are positive using softplus."""
+    #     dim = params.shape[-1]
+    #     half = dim // 2
+    #     mu = params[..., :half]
+    #     sigma = params[..., half:]  # Add small constant for numerical stability
+    #     return torch.cat([mu, sigma], dim=-1)
 
 
 if __name__ == "__main__":

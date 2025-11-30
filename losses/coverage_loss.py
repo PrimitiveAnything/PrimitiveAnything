@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 from modules.transformer import rigidTsdf
 
-from pytorch3d.ops import marching_cubes as marching_cubes_loss
+from pytorch3d.loss import chamfer_distance as chamfer_distance_loss
 
 def coverage_loss(sampledPoints, predParts):  ## coverage loss
     """

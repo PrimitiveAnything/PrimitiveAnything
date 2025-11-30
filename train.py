@@ -8,11 +8,11 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.autograd import Variable
-from tensorboardX import SummaryWriter
 from models.prim_transformer import PrimitiveTransformerQuaternion
 from dataloaders.cadConfigsChamfer import SimpleCadData
 from dataloaders.shapenet import ShapeNetDataset
-from losses import coverage_loss, consistency_loss
+from losses import coverage_loss, consistency_loss, chamfer_distance_loss
+from pytorch3d.ops import sample_points_from_meshes
 
 import modules.netUtils as netUtils
 import modules.primitives as primitives
@@ -22,57 +22,68 @@ import modules.marching_cubes as mc
 import modules.meshUtils as mUtils
 from modules.meshUtils import savePredParts
 from modules.config_utils import get_args
-from dataloaders.shapenet import R2N2ShapeNetDataset
+# from dataloaders.shapenet import R2N2ShSapeNetDataset
 from models.original import Network
 from tqdm import tqdm
+from utils.get_primitives import get_samples, get_primitives
+from primitives.compose import generate_mesh_from_primitives
 
 torch.manual_seed(0)
 
 
-def train(dataloader, netPred, reward_shaper, optimizer, iter, params, logger, device):
+def train(dataloader, netPred, optimizer, iter, params, device):
     # Get batch
     netPred.train()
     progress_bar = tqdm(dataloader, desc="Epoch progress", leave=False)
     for batch in progress_bar:
-        inputVol, sampledPoints = batch
-        inputVol = inputVol.to(device)
+        sampledPoints = batch
         sampledPoints = sampledPoints.to(device)
 
-        predParts, stocastic_actions = netPred.forward(inputVol.densities())  ## B x nPars*11
-        predParts = predParts.view(predParts.size(0), params.nParts, 12)
+        # scale_params: (B, N_primitives, 6) - μ and σ for 3D scale
+        # rotation_params: (B, N_primitives, 8) - μ and σ for quaternion
+        # translation_params: (B, N_primitives, 6) - μ and σ for 3D translation
+        # class_logits: (B, N_primitives, n_classes) - class logits
+        # eos_logits: (B, N_primitives, 1) - end-of-sequence logits
+        samples = []
+        log_probs = []
+        mask = torch.ones((sampledPoints.shape[0], netPred.n_primitives, 1), device=device)
+        point_feats = None
+        for t in range(netPred.n_primitives):
+            scale, rot, transl, cls, eos, point_feats = netPred(sampledPoints, point_features=point_feats)
 
-        optimizer.zero_grad()
-        cov_loss = coverage_loss(sampledPoints, predParts) # (B, N, 1)
-        cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol) # (B, N, 1)
-        loss = cov_loss + params.chamferLossWt * cons_loss
+            embedding = torch.cat([scale, rot, transl, eos, cls], dim=-1)
 
-        mean_reward = None
-        if params.prune == 1:
-            rewards = []
-            reward = -1 * loss.view(-1, 1).data
-            for i, action in enumerate(stocastic_actions):
-                shaped_reward = reward - params.nullReward * torch.sum(action.data)
-                shaped_reward = reward_shaper.forward(shaped_reward)
-                action.reinforce(shaped_reward)
-                rewards.append(shaped_reward)
+            if not samples or (samples and samples[-1][:, t-1, 0] != 0):
+                sample, log_prob = get_samples(embedding) # B x 1 x 11
+            else:
+                sample, log_prob = torch.zeros_like(samples[-1]), torch.zeros_like(log_probs[-1])
+                
+            samples.append(sample)
+            log_probs.append(log_prob)
 
-            mean_reward = torch.stack(rewards).mean()
+        samples = torch.concat(samples, dim=1)
+        log_probs = torch.concat(log_probs, dim=1).sum(dim=1)
+        primitives = get_primitives(samples, netPred.n_primitives)
+        meshes = generate_mesh_from_primitives(primitives)
+        predPoints = sample_points_from_meshes(meshes, 10000)
 
-            logger.add_scalar("rewards/", mean_reward, iter)
-            for i in range(params.nParts):
-                logger.add_scalar(
-                    "{}/prob".format(i), predParts[:, i, 10].data.mean(), iter
-                )
-        
+        # cov_loss = coverage_loss(sampledPoints, predParts) # (B, N, 1)
+        # cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol) # (B, N, 1)
+        # loss = cov_loss + params.chamferLossWt * cons_loss
+        loss, _ = chamfer_distance_loss(predPoints, sampledPoints, point_reduction='mean')
+
         # Display metrics
         progress_bar.set_postfix_str(
-            f"Total Loss: {loss.item():.4f}\tCoverage Loss: {cov_loss.item():.4f}\tConsistency Loss: {cons_loss.item():.4f}"
+            f"Total Loss: {loss.item():.4f}"
         )
 
+        loss *= log_probs
+
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-    return loss.item(), cov_loss.item(), cons_loss.item(), mean_reward
+    return loss.item()
 
 
 def main():
@@ -81,10 +92,7 @@ def main():
     params.visDir = os.path.join("output/visualization/", params.name)
     params.visMeshesDir = os.path.join("output/visualization/meshes/", params.name)
     params.snapshotDir = os.path.join("output/snapshots/", params.name)
-    params.primTypes = ["Cu"]
-    params.nz = 3
-    params.nPrimChoices = len(params.primTypes)
-    params.intrinsicReward = torch.Tensor(len(params.primTypes)).fill_(0)
+    params.primTypes = 3
 
     if not os.path.exists(params.visDir):
         os.makedirs(params.visDir)
@@ -94,12 +102,6 @@ def main():
 
     if not os.path.exists(params.snapshotDir):
         os.makedirs(params.snapshotDir)
-
-    params.primTypesSurface = []
-    for p in range(len(params.primTypes)):
-        params.primTypesSurface.append(params.primTypes[p])
-
-    logger = SummaryWriter("logs/{}/".format(params.name))
 
     # Load dataset
     train_dataset = ShapeNetDataset(
@@ -125,43 +127,26 @@ def main():
     # Initialize model
 
     netPred = PrimitiveTransformerQuaternion(
-        n_primitives=params.nParts,
+        n_primitives=params.nParts, # max seq len
         d_model=256,
-        n_heads=8,
+        n_heads=4,
         n_layers=6,
         n_classes=len(params.primTypes)
     )
         
     if params.usePretrain:
-        # Load model weights
-        updateShapeWtFunc = netUtils.scaleWeightsFunc(
-            params.pretrainLrShape / params.shapeLrDecay, "shapePred"
-        )
-        updateProbWtFunc = netUtils.scaleWeightsFunc(
-            params.pretrainLrProb / params.probLrDecay, "probPred"
-        )
-        updateBiasWtFunc = netUtils.scaleBiasWeights(params.probLrDecay, "probPred")
         load_path = os.path.join(
-            "../cachedir/snapshots",
+            "./models/checkpoints",
             params.pretrainNet,
-            "iter{}.pkl".format(params.pretrainIter),
         )
         netPretrain = torch.load(load_path)
         netPred.load_state_dict(netPretrain)
         print("Loading pretrained model from {}".format(load_path))
-        netPred.primitivesTable.apply(updateShapeWtFunc)
-        netPred.primitivesTable.apply(updateProbWtFunc)
-        # netPred.primitivesTable.apply(updateBiasWtFunc)
+        
     netPred.to(device)
 
     # Setup optimizer
     optimizer = torch.optim.Adam(netPred.parameters(), lr=params.learningRate)
-
-    reward_shaper = primitives.ReinforceShapeReward(
-        params.bMomentum, params.intrinsicReward, params.entropyWt
-    )
-    # reward_shaper.cuda()
-
 
     # Initialize training metrics
 
@@ -169,12 +154,7 @@ def main():
     print("Iter\tErr\tTSDF\tChamf\tMeanRe")
     for iter in tqdm(range(params.numTrainIter), desc='Training progress'):
         loss, coverage, consistency, mean_reward = train(
-            train_dataloader, netPred, reward_shaper, optimizer, iter, params, logger, device
-        )
-        print(
-            "{:10.7f}\t{:10.7f}\t{:10.7f}\t{:10.7f}\t{:10.7f}".format(
-                iter, loss, coverage, consistency, mean_reward
-            )
+            train_dataloader, netPred, optimizer, iter, params, device
         )
 
         # Visualize results
