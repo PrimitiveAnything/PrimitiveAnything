@@ -3,8 +3,8 @@ import json
 import torch
 from argparse import ArgumentParser
 
-from primitives.compose import generate_volume_from_primitives, generate_mesh_from_volumes
 from visualization.render_mesh import render_mesh
+from primitives.compose import generate_volume_from_primitives, generate_mesh_from_volumes
 from utils.get_primitives import get_primitives
 
 
@@ -32,6 +32,9 @@ def load_primitives_from_json(json_path):
         'cuboid': 0,
         'ellipsoid': 1,
         'elliptical_cylinder': 2,
+        'neg_cuboid': 3,
+        'neg_ellipsoid': 4,
+        'neg_elliptical_cylinder': 5,
     }
     
     sample_list = []
@@ -100,8 +103,8 @@ def test_compose():
     
     # Load primitives from JSON
     json_path = 'test/test_compose_input.json'
-    output_filename = 'test/test_compose_output.gif'
-    resolution = 256
+    output_filename_format = 'test/test_compose_output_{:d}.gif'.format
+    resolution = 64
     try:
         primitives = load_primitives_from_json('test/test_compose_input.json')
         print(f"Loaded {len(primitives[0])} primitives from {json_path}")
@@ -122,4 +125,5 @@ def test_compose():
     # Rendering volume
     vertices, faces = generate_mesh_from_volumes(volumes)
     print(f"Generated mesh with {vertices.shape[0]} vertices and {faces.shape[0]} faces")
-    render_mesh(vertices, faces, output_filename, device='cuda')
+    for batch in range(len(vertices)):
+        render_mesh(vertices[batch], faces[batch], output_filename_format(batch), device='cuda')

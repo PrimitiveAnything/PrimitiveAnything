@@ -6,7 +6,7 @@
         "translation": [0.0, -0.5, 0.0]
     },
     {
-        "type": "elliptical_cylinder",
+        "type": "neg_elliptical_cylinder",
         "scale": [0.3, 1.0, 0.3],
         "rotation": [0.0, 0.0, 0.0, 1.0],
         "translation": [0.0, 0.0, 0.0]

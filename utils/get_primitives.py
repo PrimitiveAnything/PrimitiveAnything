@@ -55,8 +55,16 @@ def get_primitives(samples):
                 batch_list.append(CuboidSurface(s, r, tr))
             elif prim == 1:
                 batch_list.append(EllipsoidSurface(s, r, tr))
-            else:
+            elif prim == 2:
                 batch_list.append(EllipticalCylinderSurface(s, r, tr))
+            elif prim == 3:
+                batch_list.append(CuboidSurface(s, r, tr, is_positive=False))
+            elif prim == 4:
+                batch_list.append(EllipsoidSurface(s, r, tr, is_positive=False))
+            elif prim == 5:
+                batch_list.append(EllipticalCylinderSurface(s, r, tr, is_positive=False))
+            else:
+                raise ValueError(f'Invalid primitive type code {prim}. Expected number between 0 and 5')
 
         all_batches.append(batch_list)
     

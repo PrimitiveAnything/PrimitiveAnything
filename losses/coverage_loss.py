@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 from modules.transformer import rigidTsdf
 
+from pytorch3d.ops import marching_cubes as marching_cubes_loss
 
 def coverage_loss(sampledPoints, predParts):  ## coverage loss
     """
