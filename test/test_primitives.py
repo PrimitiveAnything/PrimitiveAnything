@@ -1,11 +1,12 @@
 import torch
 import pytest
 
-from modules.get_primitives import get_samples, get_primitives
+from utils.get_primitives import get_samples, get_primitives
 from primitives import (
     CuboidSurface,
     EllipsoidSurface,
     EllipticalCylinderSurface,
+    EmptySurface
 )
 
 
@@ -16,7 +17,7 @@ from primitives import (
 def test_get_samples_shape():
     B = 4
     emb = torch.zeros((B, 1, 23))
-    out = get_samples(emb)
+    out, _ = get_samples(emb)
     assert out.shape == (B, 1, 11), "Output must be B x 1 x 11"
 
 
@@ -30,7 +31,7 @@ def test_get_samples_class_argmax():
     # logits for 3 classes at positions 20:23
     emb[:, :, 20:] = torch.tensor([[-1.0, 5.0, 0.0]])  # class=1 is max
 
-    out = get_samples(emb)
+    out, _ = get_samples(emb)
     assert torch.all(out[:, :, 10] == 1), "Class index should be argmax(logits)"
 
 
@@ -45,8 +46,8 @@ def test_get_samples_sampling_effect():
     emb[:, :, 0:3] = 1.0
     emb[:, :, 3:6] = 1.0
 
-    out1 = get_samples(emb)
-    out2 = get_samples(emb)
+    out1, _ = get_samples(emb)
+    out2, _ = get_samples(emb)
 
     # random sampling should differ
     assert not torch.allclose(out1[:, :, :3], out2[:, :, :3]), \
@@ -97,9 +98,42 @@ def test_get_primitives_batching():
     Ensure batching returns the correct nested list structure.
     """
     samples = torch.zeros((2, 4, 11))  # 2 batches, 4 parts each
-    prims = get_primitives(samples)
+    prims = get_primitives(samples, 4)
 
     assert len(prims) == 2
     assert len(prims[0]) == 4
     assert len(prims[1]) == 4
     assert all(isinstance(p, CuboidSurface) for p in prims[0])
+
+
+def test_get_primitives_padding_short_sequence():
+    # Batch of 1, sequence length 2, max length 5
+    B, T, max_len = 1, 2, 5
+    samples = torch.zeros((B, T, 11))
+    
+    # Set primitive types: first Cuboid, second Ellipsoid
+    samples[0, 0, 10] = 0
+    samples[0, 1, 10] = 1
+
+    primitives = get_primitives(samples, max_len)
+    
+    assert len(primitives) == B
+    assert len(primitives[0]) == max_len  # padded to max_len
+    # Check first two are actual surfaces, rest are EmptySurface
+    assert isinstance(primitives[0][0], CuboidSurface)
+    assert isinstance(primitives[0][1], EllipsoidSurface)
+    for p in primitives[0][2:]:
+        assert isinstance(p, EmptySurface)
+
+
+def test_get_primitives_no_padding_needed():
+    # Batch of 1, sequence length 3, max length 3
+    B, T, max_len = 1, 3, 3
+    samples = torch.zeros((B, T, 11))
+    samples[0, :, 10] = torch.tensor([0, 1, 2])  # Cuboid, Ellipsoid, EllipticalCylinder
+
+    primitives = get_primitives(samples, max_len)
+    
+    assert len(primitives[0]) == max_len
+    # Should be no EmptySurface padding
+    assert all(not isinstance(p, EmptySurface) for p in primitives[0])

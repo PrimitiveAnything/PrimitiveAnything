@@ -1,4 +1,11 @@
+import sys
 import os
+
+# CRITICAL: Add models/ to sys.path for internal imports
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_models_dir = os.path.abspath(os.path.join(_current_dir, '../..'))
+if _models_dir not in sys.path:
+    sys.path.insert(0, _models_dir)
 
 from omegaconf import OmegaConf
 import torch
@@ -13,7 +20,7 @@ def load_model():
     # print(model_config)
     if hasattr(model_config, "model"):
         model_config = model_config.model
-    ckpt_path = "./ckpt/shapevae-256.ckpt"
+    ckpt_path = os.path.join(os.path.dirname(__file__), "ckpt/shapevae-256.ckpt")
 
     model = instantiate_from_config(model_config, ckpt_path=ckpt_path)
     # model = model.cuda()

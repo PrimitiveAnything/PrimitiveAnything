@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 import math
-from primitive_anything.michelangelo import ShapeConditioner as ShapeConditioner_miche
+from models.primitive_anything.michelangelo import ShapeConditioner as ShapeConditioner_miche
 
 class QuaternionUtils:
     """
@@ -172,14 +172,14 @@ class PrimitiveTransformerQuaternion(nn.Module):
     
     def forward(
         self,
-        point_features: torch.Tensor,
+        point_cloud: torch.Tensor,
         point_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass.
         
         Args:
-            point_features: (B, N_points, D_feature) - per-point features
+            point_cloud: (B, N_points, 3) - raw point cloud OR (B, N_points, D) - pre-encoded features
             point_mask: (B, N_points) - optional mask (True = valid)
             
         Returns:
@@ -189,15 +189,17 @@ class PrimitiveTransformerQuaternion(nn.Module):
             class_logits: (B, N_primitives, n_classes) - class logits
             eos_logits: (B, N_primitives, 1) - end-of-sequence logits
         """
-        batch_size = point_features.shape[0]
+        batch_size = point_cloud.shape[0]
+        
+        # Extract point features
         with torch.no_grad():
             pc_head, pc_embed = self.michelangelo(shape=point_cloud)
-            
-            # Project features (trainable)
-            point_features = torch.cat([
-                self.to_cond_dim_head(pc_head),      # (B, d_model)
-                self.to_cond_dim(pc_embed)            # (B, seq_len, d_model)
-            ], dim=-2) 
+        
+        # Project features (trainable)
+        point_features = torch.cat([
+            self.to_cond_dim_head(pc_head),      # (B, d_model)
+            self.to_cond_dim(pc_embed)            # (B, seq_len, d_model)
+        ], dim=-2) 
         
         # Project point features
         # point_features = self.point_feature_proj(point_features)
@@ -323,7 +325,10 @@ if __name__ == "__main__":
         )
         
         # Create dummy input (raw point cloud)
-        point_cloud = torch.randn(batch_size, n_points, 3)
+        positions = torch.randn(batch_size, n_points, 3)
+        normals = torch.randn(batch_size, n_points, 3)
+        normals = torch.nn.functional.normalize(normals, p=2, dim=-1)  # Normalize normals
+        point_cloud = torch.cat([positions, normals], dim=-1)
         
         # Forward pass
         scale_params, rotation_params, translation_params, class_logits, eos_logits = model_miche(point_cloud)

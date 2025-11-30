@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from primitives import CuboidSurface, EllipsoidSurface, EllipticalCylinderSurface
+from primitives import CuboidSurface, EllipsoidSurface, EllipticalCylinderSurface, EmptySurface
 from .sample import get_sample_and_probs
 
 def get_samples(embedding):
@@ -26,9 +26,13 @@ def get_samples(embedding):
     next_state[:, :, 7:10] = translation 
     next_state[:, :, 10] = torch.argmax(probs, dim=-1)
 
+    scale_probs = torch.sum(scale_probs, dim=-1)
+    quaternion_probs = torch.sum(quaternion_probs, dim=-1)
+    translation_probs = torch.sum(translation_probs, dim=-1)
+
     return next_state, scale_probs + quaternion_probs + translation_probs
 
-def get_primitives(samples):
+def get_primitives(samples, max_prim_length=8):
     """
     Input: samples, B x T x 11
     Output: List[List[Primitives]]
@@ -51,6 +55,8 @@ def get_primitives(samples):
             r = rotation[b, t]
             tr = translation[b, t]
 
+            if t >= max_prim_length:
+                break
             if prim == 0:
                 batch_list.append(CuboidSurface(s, r, tr))
             elif prim == 1:
@@ -66,6 +72,8 @@ def get_primitives(samples):
             else:
                 raise ValueError(f'Invalid primitive type code {prim}. Expected number between 0 and 5')
 
+        padding = [EmptySurface()] * (max_prim_length - T)
+        batch_list.extend(padding)
         all_batches.append(batch_list)
     
     return all_batches

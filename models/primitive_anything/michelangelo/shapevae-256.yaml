@@ -1,8 +1,8 @@
 model:
-  target: primitive_anything.michelangelo.models.tsal.asl_pl_module.AlignedShapeAsLatentPLModule
+  target: models.primitive_anything.michelangelo.models.tsal.asl_pl_module.AlignedShapeAsLatentPLModule
   params:
     shape_module_cfg:
-      target: primitive_anything.michelangelo.models.tsal.sal_perceiver.AlignedShapeLatentPerceiver
+      target: models.primitive_anything.michelangelo.models.tsal.sal_perceiver.AlignedShapeLatentPerceiver
       params:
         num_latents: 256
         embed_dim: 64
