@@ -22,9 +22,8 @@ def test_dataloader():
     try:
         # Create dataset
         dataset = ShapeNetDataset(
-            shapenet_dir="./data/shapenet/",  # Adjust path as needed
-            n_sample_points=10000,
-            normalize=True
+            shapenet_dir="/ocean/projects/cis250266p/kanand/shapenet",  # Adjust path as needed
+            n_sample_points=10000
         )
         print(f"✓ Dataset created with {len(dataset)} samples")
         
@@ -101,8 +100,7 @@ def test_model_initialization():
             d_model=256,
             n_heads=8,
             n_layers=6,
-            n_classes=3,
-            use_michelangelo=True,
+            n_classes=3
         )
         print("✓ Model initialized")
         

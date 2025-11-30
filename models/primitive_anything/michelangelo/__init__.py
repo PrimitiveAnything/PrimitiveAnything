@@ -1,4 +1,11 @@
+import sys
 import os
+
+# CRITICAL: Add models/ to sys.path for internal imports
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_models_dir = os.path.abspath(os.path.join(_current_dir, '../..'))
+if _models_dir not in sys.path:
+    sys.path.insert(0, _models_dir)
 
 from omegaconf import OmegaConf
 import torch

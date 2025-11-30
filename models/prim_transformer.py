@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 import math
-from primitive_anything.michelangelo import ShapeConditioner as ShapeConditioner_miche
+from models.primitive_anything.michelangelo import ShapeConditioner as ShapeConditioner_miche
 
 class QuaternionUtils:
     """
