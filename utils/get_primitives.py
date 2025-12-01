@@ -12,24 +12,27 @@ def get_samples(embedding):
     scale_mean, scale_log_var = embedding[:, :, 0:3], embedding[:, :, 3:6]
     rot_mean, rot_log_var = embedding[:, :, 6:10], embedding[:, :, 10:14]
     trans_mean, trans_log_var = embedding[:, :, 14:17], embedding[:, :, 17:20]
-    probs = F.softmax(embedding[:, :, 20:], dim=-1)
+    type_logits = embedding[:, :, 20:]
 
-    next_state = torch.empty((B, nPart, 11), dtype=torch.float64, device=embedding.device)
+    next_state = torch.empty((B, nPart, 11), dtype=embedding.dtype, device=embedding.device)
     
-    scale, scale_probs = get_sample_and_probs(scale_mean, scale_log_var)
-    quaternion, quaternion_probs = get_sample_and_probs(rot_mean, rot_log_var)
-    translation, translation_probs = get_sample_and_probs(trans_mean, trans_log_var)
+    scale, scale_logprobs = get_sample_and_probs(scale_mean, scale_log_var)
+    quaternion, quaternion_logprobs = get_sample_and_probs(rot_mean, rot_log_var)
+    translation, translation_logprobs = get_sample_and_probs(trans_mean, trans_log_var)
+    type = torch.argmax(type_logits, dim=-1)
+    type_logprobs = F.log_softmax(type_logits, dim=-1)
+    type_logprobs = type_logprobs.gather(dim=-1, index=type.unsqueeze(-1)).squeeze(-1)
 
     next_state[:, :, 0:3] = scale 
     next_state[:, :, 3:7] = quaternion 
-    next_state[:, :, 7:10] = translation 
-    next_state[:, :, 10] = torch.argmax(probs, dim=-1)
+    next_state[:, :, 7:10] = translation
+    next_state[:, :, 10] = type
 
-    scale_probs = torch.sum(scale_probs, dim=-1)
-    quaternion_probs = torch.sum(quaternion_probs, dim=-1)
-    translation_probs = torch.sum(translation_probs, dim=-1)
+    scale_logprobs = torch.sum(scale_logprobs, dim=-1)
+    quaternion_logprobs = torch.sum(quaternion_logprobs, dim=-1)
+    translation_logprobs = torch.sum(translation_logprobs, dim=-1)
 
-    log_probs = scale_probs + quaternion_probs + translation_probs
+    log_probs = scale_logprobs + quaternion_logprobs + translation_logprobs + type_logprobs
     log_probs = log_probs.unsqueeze(-1)
     
     assert log_probs.shape == (next_state.shape[0], 1, 1)

@@ -4,41 +4,7 @@ import torch.nn.functional as F
 from typing import Optional, Tuple
 import math
 from models.primitive_anything.michelangelo import ShapeConditioner as ShapeConditioner_miche
-
-class QuaternionUtils:
-    """
-    Utility class for quaternion operations.
-    Quaternions are represented as [w, x, y, z] where w is the real part.
-    """
-    
-    @staticmethod
-    def normalize_quaternion(q: torch.Tensor) -> torch.Tensor:
-        return F.normalize(q, p=2, dim=-1, eps=1e-8)
-    
-    @staticmethod
-    def quaternion_to_matrix(q: torch.Tensor) -> torch.Tensor:
-        """
-        Convert quaternion to 3x3 rotation matrix.
-        
-        Args:
-            q: (..., 4) quaternion [w, x, y, z]
-            
-        Returns:
-            R: (..., 3, 3) rotation matrix
-        """
-        # Normalize first
-        q = QuaternionUtils.normalize_quaternion(q)
-        
-        w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-        
-        # Compute rotation matrix elements
-        R = torch.stack([
-            torch.stack([1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)], dim=-1),
-            torch.stack([2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)], dim=-1),
-            torch.stack([2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)], dim=-1)
-        ], dim=-2)
-        
-        return R
+from pathlib import Path
 
 
 class PositionalEncoding(nn.Module):
@@ -73,6 +39,7 @@ class PrimitiveTransformerQuaternion(nn.Module):
         n_primitives: int = 8,
         point_feature_dim: int = 256,
         d_model: int = 256,
+        d_primitive_embedding: int = 16,
         n_heads: int = 8,
         n_layers: int = 6,
         dim_feedforward: int = 1024,
@@ -86,6 +53,7 @@ class PrimitiveTransformerQuaternion(nn.Module):
         self.n_classes = n_classes
 
         self.michelangelo = ShapeConditioner_miche(dim_latent=256)
+
         for param in self.michelangelo.parameters():
             param.requires_grad = False
         self.michelangelo.eval()
@@ -94,14 +62,14 @@ class PrimitiveTransformerQuaternion(nn.Module):
         self.to_cond_dim = nn.Linear(dim_model_out * 2, d_model)
         self.to_cond_dim_head = nn.Linear(dim_model_out, d_model)
         
-        # No need for point_feature_proj since we use projection layers
-        self.point_feature_proj = None
+        # Projection layer from input embedding to d_model
+        self.input_d_model_proj = nn.Linear(10 + d_primitive_embedding, d_model)
         
         # Project point features to model dimension
         # self.point_feature_proj = nn.Linear(point_feature_dim, d_model)
         
         # Learnable query embeddings for primitives
-        self.primitive_queries = nn.Embedding(n_primitives, d_model)
+        self.primitive_encoder = nn.Embedding(n_classes, d_primitive_embedding)
         
         # SOS token
         self.sos_token = nn.Parameter(torch.randn(1, 1, d_model))
@@ -132,7 +100,7 @@ class PrimitiveTransformerQuaternion(nn.Module):
         self.scale_head = nn.Sequential(
             nn.Linear(self.d_model, self.d_model),
             nn.ReLU(),
-            nn.Linear(self.d_model, 6)
+            nn.Linear(self.d_model, 6),
         )
         
         # Rotation prediction: Quaternion with uncertainty (8 values)
@@ -172,16 +140,19 @@ class PrimitiveTransformerQuaternion(nn.Module):
     
     def forward(
         self,
-        point_cloud: torch.Tensor,
+        sequence: Optional[torch.Tensor] = None,
+        point_cloud: Optional[torch.Tensor] = None,
         point_mask: Optional[torch.Tensor] = None,
         point_features: Optional[torch.Tensor] = None,
         output_mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass.
         
         Args:
-            point_cloud: (B, N_points, 3) - raw point cloud OR (B, N_points, D) - pre-encoded features
+            sequence: (B, T, 10 + n_classes + 1) - predicted sequence so far
+            point_cloud: (B, N_points, 3) - raw point cloud
+            point_features: (B, N_points, D) - pre-encoded features
             point_mask: (B, N_points) - optional mask (True = valid)
             
         Returns:
@@ -191,32 +162,45 @@ class PrimitiveTransformerQuaternion(nn.Module):
             class_logits: (B, N_primitives, n_classes) - class logits
             eos_logits: (B, N_primitives, 1) - end-of-sequence logits
         """
-        batch_size = point_cloud.shape[0]
+        assert point_cloud is not None or point_features is not None
+
+        # Use SOS token if 
         
         # Extract point features
-        if not point_features:
+        if point_features is None:
             with torch.no_grad():
                 pc_head, pc_embed = self.michelangelo(shape=point_cloud)
             # Project features (trainable)
             point_features = torch.cat([
-                self.to_cond_dim_head(pc_head),      # (B, d_model)
+                self.to_cond_dim_head(pc_head),      # (B, 1, d_model)
                 self.to_cond_dim(pc_embed)            # (B, seq_len, d_model)
             ], dim=-2)
+        batch_size = point_features.shape[0]
         
         # Project point features
         # point_features = self.point_feature_proj(point_features)
         
-        # Create primitive queries
-        query_indices = torch.arange(self.n_primitives, device=point_features.device)
-        queries = self.primitive_queries(query_indices)
-        queries = queries.unsqueeze(0).expand(batch_size, -1, -1)
-        
-        # Prepend SOS token
-        sos = self.sos_token.expand(batch_size, -1, -1)
-        queries = torch.cat([sos, queries], dim=1)
+        # Prepare SOS token
+        sos = self.sos_token.expand(batch_size, -1, -1) # (B, 1, d_model)
+
+        if sequence is not None:
+            # Encode primitive classes
+            primitive_indices = sequence[:, :, -1].int()
+            primitive_embeddings = self.primitive_encoder(primitive_indices) # (B, T, D)
+            # Replace primitive classes with primitive embeddings
+            sequence = torch.concat(
+                [sequence[:, :, :10], primitive_embeddings], dim=-1
+            ) # (B, T, 10 + D)
+            # Project the input to d_model
+            sequence = self.input_d_model_proj(sequence) # (B, 1 + T, d_model)
+            # Preprend SOS token
+            sequence = torch.concat([sos, sequence], dim=1) # (B, 1 + T, d_model)
+        else:
+            sequence = sos
         
         # Add positional encoding
-        queries = self.query_pos_encoding(queries)
+        # Santiago: Removed this because order does not matter in our setting
+        # queries = self.query_pos_encoding(sequence)
         
         # Attention mask for point features
         memory_key_padding_mask = None
@@ -225,13 +209,13 @@ class PrimitiveTransformerQuaternion(nn.Module):
         
         # Transformer decoder
         decoded = self.transformer_decoder(
-            tgt=queries,
+            tgt=sequence,
             memory=point_features,
             memory_key_padding_mask=memory_key_padding_mask,
         )
         
-        # Remove SOS token
-        primitive_features = decoded[:, 1:, :]
+        # Get the last predicted timestep
+        primitive_features = decoded[:, -1:, :]
         
         # Apply prediction heads
         scale_params = self.scale_head(primitive_features)
@@ -240,7 +224,11 @@ class PrimitiveTransformerQuaternion(nn.Module):
         class_logits = self.class_head(primitive_features)
         eos_logits = self.eos_head(primitive_features)
         
-        # Post-process to ensure positive σ
+        # Post-process to ensure positive scale values
+        scale_params = torch.concat(
+            [torch.nn.functional.softplus(scale_params[:, :, :3]), scale_params[:, :, 3:]],
+            dim=-1
+        )
         # scale_params = self._postprocess_params(scale_params)
         # rotation_params = self._postprocess_params(rotation_params)
         # translation_params = self._postprocess_params(translation_params)
@@ -248,108 +236,9 @@ class PrimitiveTransformerQuaternion(nn.Module):
         return scale_params, rotation_params, translation_params, class_logits, eos_logits, point_features
     
     # def _postprocess_params(self, params: torch.Tensor) -> torch.Tensor:
-    #     """Ensure σ values are positive using softplus."""
+    #     """Ensures values are positive using softplus."""
     #     dim = params.shape[-1]
     #     half = dim // 2
     #     mu = params[..., :half]
     #     sigma = params[..., half:]  # Add small constant for numerical stability
     #     return torch.cat([mu, sigma], dim=-1)
-
-
-if __name__ == "__main__":
-    print("Testing PrimitiveTransformerQuaternion...")
-    
-    # Test without Michelangelo (with pre-encoded features)
-    print("\n=== Test 1: Without Michelangelo (pre-encoded features) ===")
-    model = PrimitiveTransformerQuaternion(
-        n_primitives=10,
-        d_model=256,
-        n_heads=8,
-        n_layers=6,
-        n_classes=3
-    )
-    
-    # Create dummy input (pre-encoded features)
-    batch_size = 2
-    n_points = 2048
-    point_features = torch.randn(batch_size, n_points, 256)
-    
-    # Forward pass
-    scale_params, rotation_params, translation_params, class_logits, eos_logits = model(point_features)
-    
-    # Check shapes
-    print(f"✓ scale_params shape: {scale_params.shape}")  # Should be (2, 10, 6)
-    print(f"✓ rotation_params shape: {rotation_params.shape}")  # Should be (2, 10, 8)
-    print(f"✓ translation_params shape: {translation_params.shape}")  # Should be (2, 10, 6)
-    print(f"✓ class_logits shape: {class_logits.shape}")  # Should be (2, 10, 3)
-    print(f"✓ eos_logits shape: {eos_logits.shape}")  # Should be (2, 10, 1)
-    
-    # Check that sigma values are positive
-    assert (scale_params[..., 3:] > 0).all(), "Scale sigma should be positive"
-    assert (rotation_params[..., 4:] > 0).all(), "Rotation sigma should be positive"
-    assert (translation_params[..., 3:] > 0).all(), "Translation sigma should be positive"
-    print("✓ All sigma values are positive")
-    
-    # Test quaternion normalization
-    quat_mu = rotation_params[..., :4]
-    quat_normalized = QuaternionUtils.normalize_quaternion(quat_mu)
-    quat_norms = torch.norm(quat_normalized, p=2, dim=-1)
-    assert torch.allclose(quat_norms, torch.ones_like(quat_norms), atol=1e-6), "Quaternions should have unit norm"
-    print("✓ Quaternion normalization works")
-    
-    # Test quaternion to rotation matrix
-    R = QuaternionUtils.quaternion_to_matrix(quat_normalized)
-    print(f"✓ Rotation matrix shape: {R.shape}")  # Should be (2, 10, 3, 3)
-    
-    # Check orthonormality: R^T @ R should be identity
-    RTR = torch.matmul(R.transpose(-2, -1), R)
-    I = torch.eye(3, device=R.device).unsqueeze(0).unsqueeze(0).expand_as(RTR)
-    assert torch.allclose(RTR, I, atol=1e-5), "Rotation matrices should be orthonormal"
-    print("✓ Rotation matrices are orthonormal")
-    
-    # Check determinant is +1
-    det = torch.det(R)
-    assert torch.allclose(det, torch.ones_like(det), atol=1e-5), "Determinant should be +1"
-    print("✓ Determinants are +1")
-    
-    print("\n✅ Test 1 passed!")
-    print(f"Model has {sum(p.numel() for p in model.parameters())/1e6:.2f}M parameters")
-    
-    # Test with Michelangelo (with raw point cloud)
-    print("\n=== Test 2: With Michelangelo (raw point cloud) ===")
-    try:
-        model_miche = PrimitiveTransformerQuaternion(
-            n_primitives=10,
-            d_model=256,
-            n_heads=8,
-            n_layers=6,
-            n_classes=3
-        )
-        
-        # Create dummy input (raw point cloud)
-        positions = torch.randn(batch_size, n_points, 3)
-        normals = torch.randn(batch_size, n_points, 3)
-        normals = torch.nn.functional.normalize(normals, p=2, dim=-1)  # Normalize normals
-        point_cloud = torch.cat([positions, normals], dim=-1)
-        
-        # Forward pass
-        scale_params, rotation_params, translation_params, class_logits, eos_logits = model_miche(point_cloud)
-        
-        print(f"✓ scale_params shape: {scale_params.shape}")
-        print(f"✓ rotation_params shape: {rotation_params.shape}")
-        print(f"✓ translation_params shape: {translation_params.shape}")
-        print(f"✓ class_logits shape: {class_logits.shape}")
-        print(f"✓ eos_logits shape: {eos_logits.shape}")
-        
-        print("\n✅ Test 2 passed!")
-        print(f"Model with Michelangelo has {sum(p.numel() for p in model_miche.parameters())/1e6:.2f}M parameters")
-        
-        # Count trainable vs frozen parameters
-        trainable = sum(p.numel() for p in model_miche.parameters() if p.requires_grad)
-        frozen = sum(p.numel() for p in model_miche.parameters() if not p.requires_grad)
-        print(f"Trainable: {trainable/1e6:.2f}M, Frozen (Michelangelo): {frozen/1e6:.2f}M")
-        
-    except Exception as e:
-        print(f"⚠ Test 2 skipped (Michelangelo not available): {e}")
-    
-    print("\n✅ All tests passed!")
