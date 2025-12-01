@@ -491,7 +491,7 @@ def marching_cubes_batch(volumes: torch.Tensor, iso: float = 0.5, device: str = 
     results_v = []
     results_f = []
     for b in range(B):
-        v, f = marching_cubes_single(volumes[b].squeeze(1).to(device), iso=iso)
+        v, f = marching_cubes_single(volumes[b].squeeze(0).to(device), iso=iso)
         results_v.append(v)
         results_f.append(f)
     return results_v, results_f
