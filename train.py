@@ -62,25 +62,38 @@ def train(dataloader, netPred, optimizer, iter, params, device) -> float:
 
         primitives = get_primitives(sequence, netPred.n_primitives)
         vertices, faces = generate_mesh_from_primitives(primitives, device=device)
-        meshes = Meshes(
-            verts=vertices, faces=faces
-        )
-        predPoints = sample_points_from_meshes(meshes, 10000)
 
-        # cov_loss = coverage_loss(sampledPoints, predParts) # (B, N, 1)
-        # cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol) # (B, N, 1)
-        # loss = cov_loss + params.chamferLossWt * cons_loss
-        loss, _ = chamfer_distance_loss(
-            predPoints, sampledPoints[:, :, :3], batch_reduction=None, point_reduction='mean'
-        ) # B
-        assert isinstance(loss, torch.Tensor)
+        # Start with max_loss for empty meshes
+        B = sampledPoints.size(0)
+        batch_loss = torch.full((B,), fill_value=1000, dtype=torch.float, device=device)
+
+        # Mask out empty meshes
+        empty_mask = (faces == -1).all(dim=[1, 2]) # B
+        vertices = vertices[~empty_mask]
+        faces = faces[~empty_mask]
+        if len(faces) > 0:
+            meshes = Meshes(
+                verts=vertices, faces=faces
+            )
+            predPoints = sample_points_from_meshes(meshes, 10000)
+
+            # cov_loss = coverage_loss(sampledPoints, predParts) # (B, N, 1)
+            # cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol) # (B, N, 1)
+            # loss = cov_loss + params.chamferLossWt * cons_loss
+            loss, _ = chamfer_distance_loss(
+                predPoints, sampledPoints[:, :, :3], batch_reduction=None, point_reduction='mean'
+            ) # B
+            assert isinstance(loss, torch.Tensor)
+
+            non_empty_indices = torch.arange(0, B, 1, device=device)[~empty_mask]
+            batch_loss[non_empty_indices] = loss
 
         # Display metrics
         progress_bar.set_postfix_str(
-            f"Total Loss: {loss.mean().item():.4f}"
+            f"Total Loss: {batch_loss.mean().item():.4f}"
         )
 
-        loss = (loss * log_probs).mean()
+        loss = (batch_loss.detach() * log_probs).mean()
 
         optimizer.zero_grad()
         loss.backward()
