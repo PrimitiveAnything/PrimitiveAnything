@@ -1,7 +1,14 @@
 # Project specific ignores
 logs/
-.vscode/
 data/
+*.pt
+*.ckpt
+
+# IDEs and editors
+.vscode/
+
+# Python specific ignores
+.pytest_cache/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

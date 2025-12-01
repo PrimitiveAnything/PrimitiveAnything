@@ -3,35 +3,26 @@ CUDA_VISIBLE_DEVICES=1 python cadAutoEncCuboids/primSelTsdfChamfer.py
 """
 
 import os
-import sys
 import torch
 from torch.utils.data import DataLoader
-import torch.nn as nn
-from torch.autograd import Variable
 from models.prim_transformer import PrimitiveTransformerQuaternion
-from dataloaders.cadConfigsChamfer import SimpleCadData
 from dataloaders.shapenet import ShapeNetDataset
-from losses import coverage_loss, consistency_loss, chamfer_distance_loss
 from pytorch3d.ops import sample_points_from_meshes
-
-import modules.netUtils as netUtils
-import modules.primitives as primitives
-
-from modules.plotUtils import plot3, plot_parts, plot_cuboid
-import modules.marching_cubes as mc
-import modules.meshUtils as mUtils
-from modules.meshUtils import savePredParts
-from modules.config_utils import get_args
-# from dataloaders.shapenet import R2N2ShSapeNetDataset
-from models.original import Network
 from tqdm import tqdm
+
+import modules.primitives as primitives
+from losses import chamfer_distance_loss
+from modules.config_utils import get_args
 from utils.get_primitives import get_samples, get_primitives
 from primitives.compose import generate_mesh_from_primitives
+from visualization.render_mesh import render_mesh
+from utils.get_optimizer import get_optimizer
+from pytorch3d.structures import Meshes
 
 torch.manual_seed(0)
 
 
-def train(dataloader, netPred, optimizer, iter, params, device):
+def train(dataloader, netPred, optimizer, iter, params, device) -> float:
     # Get batch
     netPred.train()
     progress_bar = tqdm(dataloader, desc="Epoch progress", leave=False)
@@ -44,40 +35,52 @@ def train(dataloader, netPred, optimizer, iter, params, device):
         # translation_params: (B, N_primitives, 6) - μ and σ for 3D translation
         # class_logits: (B, N_primitives, n_classes) - class logits
         # eos_logits: (B, N_primitives, 1) - end-of-sequence logits
-        samples = []
+        sequence = None
         log_probs = []
-        mask = torch.ones((sampledPoints.shape[0], netPred.n_primitives, 1), device=device)
         point_feats = None
         for t in range(netPred.n_primitives):
-            scale, rot, transl, cls, eos, point_feats = netPred(sampledPoints, point_features=point_feats)
+            scale, rot, transl, cls, eos, point_feats = netPred(
+                sequence=sequence, point_cloud=sampledPoints, point_features=point_feats
+            )
 
-            embedding = torch.cat([scale, rot, transl, eos, cls], dim=-1)
+            embedding = torch.cat([scale, rot, transl, eos, cls], dim=-1) # B, 1, 24
 
-            if not samples or (samples and samples[-1][:, t-1, 0] != 0):
-                sample, log_prob = get_samples(embedding) # B x 1 x 11
-            else:
-                sample, log_prob = torch.zeros_like(samples[-1]), torch.zeros_like(log_probs[-1])
+            sample, log_prob = get_samples(embedding) # B x 1 x 11
                 
-            samples.append(sample)
+            sequence = sample if sequence is None else torch.concat([sequence, sample], dim=1) # (B, T + 1, 11)
             log_probs.append(log_prob)
 
-        samples = torch.concat(samples, dim=1)
-        log_probs = torch.concat(log_probs, dim=1).sum(dim=1)
-        primitives = get_primitives(samples, netPred.n_primitives)
-        meshes = generate_mesh_from_primitives(primitives)
+        log_probs = torch.concat(log_probs, dim=1) # B x T x 1
+
+        assert sequence is not None
+        # Generate a mask that is only true if all previous sampled type where not the EOS token
+        sampled_types = sequence[..., 10:] # B x T x 1
+        mask = (sampled_types != 0).cumprod(dim=1) # B x T x 1
+        # Mask out every primitive after the first EOS token
+        log_probs = (log_probs * mask).sum(dim=[1, 2]) # B
+        sequence = sequence * mask # B x T x 11
+
+        primitives = get_primitives(sequence, netPred.n_primitives)
+        vertices, faces = generate_mesh_from_primitives(primitives, device=device)
+        meshes = Meshes(
+            verts=vertices, faces=faces
+        )
         predPoints = sample_points_from_meshes(meshes, 10000)
 
         # cov_loss = coverage_loss(sampledPoints, predParts) # (B, N, 1)
         # cons_loss = consistency_loss(predParts, params.nSamplesChamfer, sampledPoints, inputVol) # (B, N, 1)
         # loss = cov_loss + params.chamferLossWt * cons_loss
-        loss, _ = chamfer_distance_loss(predPoints, sampledPoints, point_reduction='mean')
+        loss, _ = chamfer_distance_loss(
+            predPoints, sampledPoints[:, :, :3], batch_reduction=None, point_reduction='mean'
+        ) # B
+        assert isinstance(loss, torch.Tensor)
 
         # Display metrics
         progress_bar.set_postfix_str(
-            f"Total Loss: {loss.item():.4f}"
+            f"Total Loss: {loss.mean().item():.4f}"
         )
 
-        loss *= log_probs
+        loss = (loss * log_probs).mean()
 
         optimizer.zero_grad()
         loss.backward()
@@ -85,6 +88,58 @@ def train(dataloader, netPred, optimizer, iter, params, device):
 
     return loss.item()
 
+@torch.inference_mode()
+def evaluate(dataloader, netPred, device, epoch) -> float:
+    # Get batch
+    netPred.eval()
+    progress_bar = tqdm(dataloader, desc="Validation progress", leave=False)
+    visualization_count = 0
+    validation_loss = 0
+    n_batch = len(dataloader)
+    for batch in progress_bar:
+        sampledPoints = batch
+        sampledPoints = sampledPoints.to(device)
+
+        # scale_params: (B, N_primitives, 6) - μ and σ for 3D scale
+        # rotation_params: (B, N_primitives, 8) - μ and σ for quaternion
+        # translation_params: (B, N_primitives, 6) - μ and σ for 3D translation
+        # class_logits: (B, N_primitives, n_classes) - class logits
+        # eos_logits: (B, N_primitives, 1) - end-of-sequence logits
+        sequence = None
+        point_feats = None
+        for t in range(netPred.n_primitives):
+            scale, rot, transl, cls, eos, point_feats = netPred(
+                sequence=sequence, point_cloud=sampledPoints, point_features=point_feats
+            )
+
+            embedding = torch.cat([scale, rot, transl, eos, cls], dim=-1)
+
+            if sequence is None or sequence[-1][:, t-1, 0] != 0:
+                sample, _ = get_samples(embedding) # B x 1 x 11
+            else:
+                sample, _ = torch.zeros_like(sequence[:, :1, :]), torch.zeros_like(log_probs[-1])
+                
+            sequence = sample if sequence is None else torch.concat([sequence, sample], dim=1) # (B, T + 1, 11)
+
+        primitives = get_primitives(sequence, netPred.n_primitives)
+        vertices, faces = generate_mesh_from_primitives(primitives)
+        meshes = Meshes(
+            verts=vertices, faces=faces
+        )
+        predPoints = sample_points_from_meshes(meshes, 10000)
+        loss, _ = chamfer_distance_loss(predPoints, sampledPoints, point_reduction='mean')
+        assert isinstance(loss, torch.Tensor)
+
+        # Visualize predicted mesh
+        for index in range(len(vertices)):
+            output_dir = f'visualizations/epoch_{epoch}/'
+            output_filename_format = '{:d}.gif'.format
+            render_mesh(vertices[index], faces[index], output_dir + output_filename_format(visualization_count), device=device)
+            visualization_count +=1
+
+        validation_loss += loss.item() / n_batch
+
+    return validation_loss
 
 def main():
 
@@ -92,7 +147,7 @@ def main():
     params.visDir = os.path.join("output/visualization/", params.name)
     params.visMeshesDir = os.path.join("output/visualization/meshes/", params.name)
     params.snapshotDir = os.path.join("output/snapshots/", params.name)
-    params.primTypes = 3
+    params.primTypes = 3 # TODO Change to CLI
 
     if not os.path.exists(params.visDir):
         os.makedirs(params.visDir)
@@ -105,21 +160,19 @@ def main():
 
     # Load dataset
     train_dataset = ShapeNetDataset(
-                    shapenet_dir="./data/shapenet/",
-                    n_sample_points=10000,  # Match Michelangelo's training
-                    )
+        shapenet_dir="./data/shapenet_train/",
+        n_sample_points=10000,  # Match Michelangelo's training
+    )
     train_dataloader = DataLoader(
         train_dataset, batch_size=params.batchSize, shuffle=True, num_workers=4
     )
-    # test_dataset = R2N2ShapeNetDataset(
-    #     partition="test",
-    #     r2n2_shapenet_dir=params.modelsDataDir,
-    #     synsets=params.synset,
-    #     n_sample_points=params.nSamplePoints,
-    # )
-    # test_dataloader = DataLoader(
-    #     test_dataset, batch_size=params.batchSize, shuffle=False, num_workers=4, collate_fn=train_dataset.collate_fn
-    # )
+    test_dataset = ShapeNetDataset(
+        shapenet_dir="./data/shapenet_test/",
+        n_sample_points=10000,  # Match Michelangelo's training
+    )
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=params.batchSize, shuffle=False, num_workers=4
+    )
 
     # Set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -131,7 +184,7 @@ def main():
         d_model=256,
         n_heads=4,
         n_layers=6,
-        n_classes=len(params.primTypes)
+        n_classes=params.primTypes
     )
         
     if params.usePretrain:
@@ -146,73 +199,21 @@ def main():
     netPred.to(device)
 
     # Setup optimizer
-    optimizer = torch.optim.Adam(netPred.parameters(), lr=params.learningRate)
+    optimizer = get_optimizer(netPred)
 
     # Initialize training metrics
 
     # Train the model
-    print("Iter\tErr\tTSDF\tChamf\tMeanRe")
     for iter in tqdm(range(params.numTrainIter), desc='Training progress'):
-        loss, coverage, consistency, mean_reward = train(
+        loss = train(
             train_dataloader, netPred, optimizer, iter, params, device
         )
 
         # Visualize results
-        if iter % params.visIter == 0 and False:
-            reshapeSize = torch.Size(
-                [
-                    params.batchSizeVis,
-                    1,
-                    params.gridSize,
-                    params.gridSize,
-                    params.gridSize,
-                ]
-            )
+        if iter % params.visIter == 0:
+            evaluate(test_dataloader, netPred, device, epoch=iter)
 
-            for batch in tqdm(test_dataloader, desc='Validation progress', leave=False):
-                sample, tsdfGt, sampledPoints = batch
-
-                sampledPoints = sampledPoints[0 : params.batchSizeVis].cuda()
-                sample = sample[0 : params.batchSizeVis].cuda()
-                tsdfGt = tsdfGt[0 : params.batchSizeVis].view(reshapeSize)
-
-                netPred.eval()
-                shapePredParams, _ = netPred.forward(Variable(sample))
-                shapePredParams = shapePredParams.view(
-                    params.batchSizeVis, params.nParts, 12
-                )
-                netPred.train()
-
-                if iter % params.meshSaveIter == 0:
-
-                    meshGridInit = primitives.meshGrid(
-                        [-params.gridBound, -params.gridBound, -params.gridBound],
-                        [params.gridBound, params.gridBound, params.gridBound],
-                        [params.gridSize, params.gridSize, params.gridSize],
-                    )
-                    predParams = shapePredParams
-                    for b in range(0, tsdfGt.size(0)):
-
-                        visTriSurf = mc.march(tsdfGt[b][0].cpu().numpy())
-                        mc.writeObj(
-                            "{}/iter{}_inst{}_gt.obj".format(
-                                params.visMeshesDir, iter, b
-                            ),
-                            visTriSurf,
-                        )
-
-                        pred_b = []
-                        for px in range(params.nParts):
-                            pred_b.append(predParams[b, px, :].clone().data.cpu())
-
-                        mUtils.saveParts(
-                            pred_b,
-                            "{}/iter{}_inst{}_pred.obj".format(
-                                params.visMeshesDir, iter, b
-                            ),
-                        )
-
-        if ((iter + 1) % 1000) == 0:
+        if ((iter + 1) % 10) == 0:
             torch.save(
                 netPred.state_dict(), "{}/iter{}.pkl".format(params.snapshotDir, iter)
             )

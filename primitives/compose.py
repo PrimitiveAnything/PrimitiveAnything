@@ -1,6 +1,7 @@
 import torch
 from pytorch3d.structures import Volumes
 import mcubes
+from torch.nn.utils.rnn import pad_sequence
 
 def compute_combined_sdf_from_primitives(grid_points: torch.Tensor, primitives: list[list]):
     """
@@ -82,21 +83,21 @@ def generate_mesh_from_volumes(volumes: Volumes, device: str = 'cpu'):
     batch_faces = []
     for volume in volume_array:
         vertices, faces = mcubes.marching_cubes(volume.squeeze(), isovalue=0.5)
-        vertices = torch.tensor(vertices, device=device, dtype=torch.float).unsqueeze(0)
-        faces = torch.tensor(faces, device=device, dtype=torch.float).unsqueeze(0)
+        vertices = torch.tensor(vertices, device=device, dtype=torch.float)
+        faces = torch.tensor(faces, device=device, dtype=torch.float)
 
         vertices = vertices / resolution * 2 - 1
 
-        # Rescale the vertices
-        vertices = volumes.local_to_world_coords(vertices)
         batch_vertices.append(vertices)
         batch_faces.append(faces)
-    batch_vertices = torch.concat(batch_vertices)
-    batch_faces = torch.concat(batch_faces)
+    batch_vertices = pad_sequence(batch_vertices, batch_first=True, padding_value=0)
+    batch_faces = pad_sequence(batch_faces, batch_first=True, padding_value=-1)
+    # Rescale the vertices
+    batch_vertices = volumes.local_to_world_coords(batch_vertices)
     
     return batch_vertices, batch_faces
 
-def generate_volume_from_primitives(primitives_batch: list[list], resolution=128):
+def generate_volume_from_primitives(primitives_batch: list[list], device: str = 'cpu', resolution=128):
     """
     Generate a PyTorch3D Volumes object from primitives.
     
@@ -115,7 +116,7 @@ def generate_volume_from_primitives(primitives_batch: list[list], resolution=128
 
     # Base case: all sequences are empty
     if P == 0:
-        occupancy_volume = torch.zeros((B, 1, resolution, resolution, resolution))
+        occupancy_volume = torch.zeros((B, 1, resolution, resolution, resolution), device=device)
         volumes = Volumes(occupancy_volume)
         return volumes
 
@@ -124,15 +125,15 @@ def generate_volume_from_primitives(primitives_batch: list[list], resolution=128
     xyz_max = []
     for primitive_list in primitives_batch:
         for primitive in primitive_list:
-            xyz_min.append(primitive.min_xyz)
-            xyz_max.append(primitive.max_xyz) 
+            xyz_min.append(primitive.min_xyz.cpu())
+            xyz_max.append(primitive.max_xyz.cpu()) 
     xyz_min = torch.min(torch.stack(xyz_min), dim=0)[0]
     xyz_max = torch.max(torch.stack(xyz_max), dim=0)[0]
 
     # Create grid points to evaluate on the combined SDF
-    x = torch.linspace(xyz_min[0].item(), xyz_max[0].item(), resolution + 1)
-    y = torch.linspace(xyz_min[1].item(), xyz_max[1].item(), resolution + 1)
-    z = torch.linspace(xyz_min[2].item(), xyz_max[2].item(), resolution + 1)
+    x = torch.linspace(xyz_min[0].item(), xyz_max[0].item(), resolution + 1, device=device)
+    y = torch.linspace(xyz_min[1].item(), xyz_max[1].item(), resolution + 1, device=device)
+    z = torch.linspace(xyz_min[2].item(), xyz_max[2].item(), resolution + 1, device=device)
     grid_x, grid_y, grid_z = torch.meshgrid(x, y, z, indexing='ij')
     grid_points = torch.stack([grid_x.flatten(), grid_y.flatten(), grid_z.flatten()], dim=-1)
     
@@ -167,7 +168,7 @@ def generate_volume_from_primitives(primitives_batch: list[list], resolution=128
     
     return volumes
 
-def generate_mesh_from_primitives(primitives: list[list], resolution=128):
-    volumes = generate_volume_from_primitives(primitives_batch=primitives, resolution=resolution)
-    meshes = generate_mesh_from_volumes(volumes=volumes)
+def generate_mesh_from_primitives(primitives: list[list], device: str = 'cpu', resolution=128):
+    volumes = generate_volume_from_primitives(primitives_batch=primitives, device=device, resolution=resolution)
+    meshes = generate_mesh_from_volumes(volumes=volumes, device=device)
     return meshes

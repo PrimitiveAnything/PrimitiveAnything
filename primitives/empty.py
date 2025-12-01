@@ -13,7 +13,7 @@ class EmptySurface:
         points: (N,3) tensor
         Returns: (N,) tensor
         """
-        return torch.ones(points.shape[0], device=points.device, dtype=points.dtype) * 1.0
+        return torch.ones(points.shape[0], device=points.device, dtype=points.dtype)
 
     def __call__(self, points):
         return self.empty_sdf(points)
