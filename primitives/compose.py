@@ -1,6 +1,6 @@
 import torch
 from pytorch3d.structures import Volumes
-import mcubes
+from utils.marching_cubes import marching_cubes_batch
 
 def compute_combined_sdf_from_primitives(grid_points: torch.Tensor, primitives: list[list]):
     """
@@ -81,7 +81,7 @@ def generate_mesh_from_volumes(volumes: Volumes, device: str = 'cpu'):
     batch_vertices = []
     batch_faces = []
     for volume in volume_array:
-        vertices, faces = mcubes.marching_cubes(volume.squeeze(), isovalue=0.5)
+        vertices, faces = marching_cubes_batch(volume.squeeze(), isovalue=0.5, device=device)
         vertices = torch.tensor(vertices, device=device, dtype=torch.float).unsqueeze(0)
         faces = torch.tensor(faces, device=device, dtype=torch.float).unsqueeze(0)
 
