@@ -110,8 +110,10 @@ def evaluate(dataloader, netPred, device, epoch) -> float:
     validation_loss = 0
     n_batch = len(dataloader)
     for batch in progress_bar:
-        sampledPoints = batch
+        sampledPoints, vertsGt, facesGt = batch
         sampledPoints = sampledPoints.to(device)
+        vertsGt = vertsGt.to(device)
+        facesGt = facesGt.to(device)
 
         # scale_params: (B, N_primitives, 6) - μ and σ for 3D scale
         # rotation_params: (B, N_primitives, 8) - μ and σ for quaternion
@@ -147,7 +149,9 @@ def evaluate(dataloader, netPred, device, epoch) -> float:
         for index in range(len(vertices)):
             output_dir = f'visualizations/epoch_{epoch}/'
             output_filename_format = '{:d}.gif'.format
+            output_filename_format_gt = '{:d}_gt.gif'.format
             render_mesh(vertices[index], faces[index], output_dir + output_filename_format(visualization_count), device=device)
+            render_mesh(vertsGt[index], facesGt[index], output_dir + output_filename_format_gt(visualization_count), device=device)
             visualization_count +=1
 
         validation_loss += loss.item() / n_batch
