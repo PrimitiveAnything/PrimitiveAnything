@@ -29,12 +29,12 @@ def load_primitives_from_json(json_path):
     
     # Mapping from type string to integer
     type_map = {
-        'cuboid': 0,
-        'ellipsoid': 1,
-        'elliptical_cylinder': 2,
-        'neg_cuboid': 3,
-        'neg_ellipsoid': 4,
-        'neg_elliptical_cylinder': 5,
+        'cuboid': 1,
+        'ellipsoid': 2,
+        'elliptical_cylinder': 3,
+        'neg_cuboid': 4,
+        'neg_ellipsoid': 5,
+        'neg_elliptical_cylinder': 6,
     }
     
     sample_list = []
@@ -126,4 +126,4 @@ def test_compose():
     vertices, faces = generate_mesh_from_volumes(volumes)
     print(f"Generated mesh with {vertices.shape[0]} vertices and {faces.shape[0]} faces")
     for batch in range(len(vertices)):
-        render_mesh(vertices[batch], faces[batch], output_filename_format(batch), device='cuda')
+        render_mesh(vertices[batch], faces[batch], output_filename_format(batch), device=volumes.device)

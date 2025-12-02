@@ -6,8 +6,6 @@ from math import tan, pi
 
 
 def render_mesh(vertices, faces, output_filename, device):
-    vertices, faces = [x.to(device=device, dtype=torch.float) for x in (vertices, faces)]
-
     # Define texture
     textures_rgb = torch.ones_like(vertices, device=device) * torch.tensor([0.6, 0.6, 0.3], device=device)
     textures = pytorch3d.renderer.TexturesVertex([textures_rgb])

@@ -77,22 +77,12 @@ def generate_mesh_from_volumes(volumes: Volumes, device: str = 'cpu'):
     Returns: vertices, faces
     """
     # Extract mesh using marching cubes
-    volume_array = volumes.densities().cpu().numpy()
-    resolution = volume_array.shape[-1]
-    batch_vertices = []
-    batch_faces = []
-    for volume in volume_array:
-        vertices, faces = marching_cubes_batch(volume.squeeze(), isovalue=0.5, device=device)
-        vertices = torch.tensor(vertices, device=device, dtype=torch.float)
-        faces = torch.tensor(faces, device=device, dtype=torch.float)
-
-        vertices = vertices / resolution * 2 - 1
-
-        batch_vertices.append(vertices)
-        batch_faces.append(faces)
-    batch_vertices = pad_sequence(batch_vertices, batch_first=True, padding_value=0)
-    batch_faces = pad_sequence(batch_faces, batch_first=True, padding_value=-1)
+    resolution = volumes.densities().shape[-1]
+    vertices, faces = marching_cubes_batch(volumes.densities(), iso=0.5)
+    batch_vertices = pad_sequence(vertices, batch_first=True, padding_value=0)
+    batch_faces = pad_sequence(faces, batch_first=True, padding_value=-1)
     # Rescale the vertices
+    batch_vertices = batch_vertices / resolution * 2 - 1
     batch_vertices = volumes.local_to_world_coords(batch_vertices)
     
     return batch_vertices, batch_faces
@@ -131,9 +121,9 @@ def generate_volume_from_primitives(primitives_batch: list[list], device: str = 
     xyz_max = torch.max(torch.stack(xyz_max), dim=0)[0]
 
     # Create grid points to evaluate on the combined SDF
-    x = torch.linspace(xyz_min[0].item(), xyz_max[0].item(), resolution + 1, device=device)
-    y = torch.linspace(xyz_min[1].item(), xyz_max[1].item(), resolution + 1, device=device)
-    z = torch.linspace(xyz_min[2].item(), xyz_max[2].item(), resolution + 1, device=device)
+    x = torch.linspace(xyz_min[0].item(), xyz_max[0].item(), resolution, device=device)
+    y = torch.linspace(xyz_min[1].item(), xyz_max[1].item(), resolution, device=device)
+    z = torch.linspace(xyz_min[2].item(), xyz_max[2].item(), resolution, device=device)
     grid_x, grid_y, grid_z = torch.meshgrid(x, y, z, indexing='ij')
     grid_points = torch.stack([grid_x.flatten(), grid_y.flatten(), grid_z.flatten()], dim=-1)
     
@@ -145,7 +135,7 @@ def generate_volume_from_primitives(primitives_batch: list[list], device: str = 
 
     # Convert SDF to occupancy (negative SDF = inside = 1, positive SDF = outside = 0)
     B, N = sdf_values.shape
-    sdf_volume = sdf_values.reshape(B, 1, resolution + 1, resolution + 1, resolution + 1)
+    sdf_volume = sdf_values.reshape(B, 1, resolution, resolution, resolution)
     occupancy_volume = (sdf_volume < 0).float() # Occupied if inside the composed shape
     occupancy_volume = occupancy_volume.permute(0, 1, 4, 3, 2) # (B, C, D, H, W)
     
@@ -154,7 +144,7 @@ def generate_volume_from_primitives(primitives_batch: list[list], device: str = 
     # We'll use batch size of 1 and density_dim of 1
 
     # Calculate voxel size based on bbox and resolution
-    voxel_size = (xyz_max - xyz_min) / resolution
+    voxel_size = (xyz_max - xyz_min) / (resolution - 1)
     
     # Calculate volume translation (center of the bounding box)
     volume_translation = (xyz_max + xyz_min) / 2
