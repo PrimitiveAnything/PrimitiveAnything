@@ -27,7 +27,7 @@ def train(dataloader, netPred, optimizer, iter, params, device) -> float:
     netPred.train()
     progress_bar = tqdm(dataloader, desc="Epoch progress", leave=False)
     for batch in progress_bar:
-        sampledPoints = batch
+        sampledPoints, verts, faces = batch
         sampledPoints = sampledPoints.to(device)
 
         # scale_params: (B, N_primitives, 6) - μ and σ for 3D scale
