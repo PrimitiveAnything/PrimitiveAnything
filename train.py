@@ -93,7 +93,7 @@ def train(dataloader, netPred, optimizer, iter, params, device) -> float:
             f"Total Loss: {batch_loss.mean().item():.4f}"
         )
 
-        loss = (batch_loss.detach() * log_probs).mean()
+        loss = (batch_loss * log_probs).mean()
 
         optimizer.zero_grad()
         loss.backward()
