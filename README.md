@@ -127,10 +127,11 @@ python eval.py
 If you find our work useful, please kindly cite:
 
 ```
-@article{ye2025primitiveanything,
-  title={PrimitiveAnything: Human-Crafted 3D Primitive Assembly Generation with Auto-Regressive Transformer},
+@inproceedings{ye2025primitiveanything,
+  title={PrimitiveAnything: Human-crafted 3D primitive assembly generation with auto-regressive Transformer},
   author={Ye, Jingwen and He, Yuze and Zhou, Yanning and Zhu, Yiqin and Xiao, Kaiwen and Liu, Yong-Jin and Yang, Wei and Han, Xiao},
-  journal={arXiv preprint arXiv:2505.04622},
+  booktitle={Proceedings of the Special Interest Group on Computer Graphics and Interactive Techniques Conference Conference Papers},
+  pages={1--12},
   year={2025}
 }
 ```
